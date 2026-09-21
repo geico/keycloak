@@ -173,11 +173,18 @@ public final class BruteForceAuthChannel {
      */
     public static boolean isTemporarilyLocked(KeycloakSession session, RealmModel realm, UserModel user,
             String channel) {
+        return isTemporarilyLocked(session, realm, user, channel, null);
+    }
+
+    public static boolean isTemporarilyLocked(KeycloakSession session, RealmModel realm, UserModel user,
+            String channel, String attemptedIdentifier) {
         if (!isProtected(realm, channel)) {
             return false;
         }
         int currentTime = Time.currentTime();
-        return failures(session, realm, user, channel)
+        return channelKeys(realm, user, channel, attemptedIdentifier).stream()
+                .map(failureKey -> session.loginFailures().getUserLoginFailure(realm, failureKey))
+                .filter(Objects::nonNull)
                 .anyMatch(model -> currentTime < model.getFailedLoginNotBefore());
     }
 
@@ -187,10 +194,15 @@ public final class BruteForceAuthChannel {
      */
     public static boolean isPermanentlyLocked(KeycloakSession session, RealmModel realm, UserModel user,
             String channel) {
+        return isPermanentlyLocked(session, realm, user, channel, null);
+    }
+
+    public static boolean isPermanentlyLocked(KeycloakSession session, RealmModel realm, UserModel user,
+            String channel, String attemptedIdentifier) {
         if (!isProtected(realm, channel) || !realm.isPermanentLockout()) {
             return false;
         }
-        for (String failureKey : getFailureKeys(realm, user, channel)) {
+        for (String failureKey : channelKeys(realm, user, channel, attemptedIdentifier)) {
             UserLoginFailureModel model = session.loginFailures().getUserLoginFailure(realm, failureKey);
             if (model != null && BruteForceUserProperty.isPermanentlyLocked(realm, model, failureKey)) {
                 return true;
@@ -199,11 +211,12 @@ public final class BruteForceAuthChannel {
         return false;
     }
 
-    private static Stream<UserLoginFailureModel> failures(KeycloakSession session, RealmModel realm, UserModel user,
-            String channel) {
-        return getFailureKeys(realm, user, channel).stream()
-                .map(failureKey -> session.loginFailures().getUserLoginFailure(realm, failureKey))
-                .filter(Objects::nonNull);
+    private static List<String> channelKeys(RealmModel realm, UserModel user, String channel,
+            String attemptedIdentifier) {
+        if (attemptedIdentifier == null || attemptedIdentifier.isBlank()) {
+            return getFailureKeys(realm, user, channel);
+        }
+        return getFailureKeysForAttempt(realm, user, channel, attemptedIdentifier);
     }
 
     static String channelKey(String channel, String baseKey) {

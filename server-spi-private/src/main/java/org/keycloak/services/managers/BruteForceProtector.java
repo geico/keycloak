@@ -47,6 +47,15 @@ public interface BruteForceProtector extends Provider {
 
     void successfulLogin(RealmModel realm, UserModel user, ClientConnection clientConnection, UriInfo uriInfo, Set<String> authenticationCategories);
 
+    /**
+     * Records a successful login, clearing only the counters that apply to {@code attemptedIdentifier}.
+     * Custom providers can ignore the identifier by delegating to {@link #successfulLogin}.
+     */
+    default void successfulLogin(RealmModel realm, UserModel user, ClientConnection clientConnection, UriInfo uriInfo,
+            Set<String> authenticationCategories, String attemptedIdentifier) {
+        successfulLogin(realm, user, clientConnection, uriInfo, authenticationCategories);
+    }
+
     boolean isTemporarilyDisabled(KeycloakSession session, RealmModel realm, UserModel user);
 
     /**
@@ -59,6 +68,15 @@ public interface BruteForceProtector extends Provider {
         return isTemporarilyDisabled(session, realm, user);
     }
 
+    /**
+     * Whether login is temporarily blocked for {@code authenticationChannel} and
+     * {@code attemptedIdentifier}. Custom providers can ignore the identifier.
+     */
+    default boolean isTemporarilyDisabled(KeycloakSession session, RealmModel realm, UserModel user,
+            String authenticationChannel, String attemptedIdentifier) {
+        return isTemporarilyDisabled(session, realm, user, authenticationChannel);
+    }
+
     boolean isPermanentlyLockedOut(KeycloakSession session, RealmModel realm, UserModel user);
 
     /**
@@ -68,6 +86,15 @@ public interface BruteForceProtector extends Provider {
     default boolean isPermanentlyLockedOut(KeycloakSession session, RealmModel realm, UserModel user,
             String authenticationChannel) {
         return isPermanentlyLockedOut(session, realm, user);
+    }
+
+    /**
+     * Whether {@code authenticationChannel} and {@code attemptedIdentifier} exhausted their
+     * attempts. Custom providers can ignore the identifier.
+     */
+    default boolean isPermanentlyLockedOut(KeycloakSession session, RealmModel realm, UserModel user,
+            String authenticationChannel, String attemptedIdentifier) {
+        return isPermanentlyLockedOut(session, realm, user, authenticationChannel);
     }
 
     /**

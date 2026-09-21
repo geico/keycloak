@@ -43,6 +43,7 @@ import org.keycloak.util.JsonSerialization;
 import com.fasterxml.jackson.core.type.TypeReference;
 import org.jboss.logging.Logger;
 
+import static org.keycloak.authentication.authenticators.browser.AbstractUsernameFormAuthenticator.ATTEMPTED_USERNAME;
 import static org.keycloak.authentication.authenticators.browser.AbstractUsernameFormAuthenticator.USER_SET_BEFORE_USERNAME_PASSWORD_AUTH;
 
 /**
@@ -57,11 +58,16 @@ public final class AuthenticatorUtils {
 
     public static String getDisabledByBruteForceEventError(BruteForceProtector protector, KeycloakSession session,
             RealmModel realm, UserModel user, String authenticationChannel) {
+        return getDisabledByBruteForceEventError(protector, session, realm, user, authenticationChannel, null);
+    }
+
+    public static String getDisabledByBruteForceEventError(BruteForceProtector protector, KeycloakSession session,
+            RealmModel realm, UserModel user, String authenticationChannel, String attemptedIdentifier) {
         if (realm.isBruteForceProtected()) {
-            if (protector.isPermanentlyLockedOut(session, realm, user, authenticationChannel)) {
+            if (protector.isPermanentlyLockedOut(session, realm, user, authenticationChannel, attemptedIdentifier)) {
                 return Errors.USER_DISABLED;
             }
-            else if (protector.isTemporarilyDisabled(session, realm, user, authenticationChannel)) {
+            else if (protector.isTemporarilyDisabled(session, realm, user, authenticationChannel, attemptedIdentifier)) {
                 return Errors.USER_TEMPORARILY_DISABLED;
             }
             return null;
@@ -70,9 +76,12 @@ public final class AuthenticatorUtils {
     }
 
     public static String getDisabledByBruteForceEventError(AuthenticationFlowContext authnFlowContext, UserModel authenticatedUser) {
+        String attemptedIdentifier = authnFlowContext.getAuthenticationSession() == null
+                ? null
+                : authnFlowContext.getAuthenticationSession().getAuthNote(ATTEMPTED_USERNAME);
         return AuthenticatorUtils.getDisabledByBruteForceEventError(authnFlowContext.getProtector(),
                 authnFlowContext.getSession(), authnFlowContext.getRealm(), authenticatedUser,
-                getAuthenticationChannel(authnFlowContext));
+                getAuthenticationChannel(authnFlowContext), attemptedIdentifier);
     }
 
     /**
