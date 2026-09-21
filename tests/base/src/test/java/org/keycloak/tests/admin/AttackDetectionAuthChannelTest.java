@@ -63,18 +63,26 @@ public class AttackDetectionAuthChannelTest {
     @InjectUser(config = ChannelUserConfig.class)
     ManagedUser user;
 
+    @InjectUser(ref = "otpUser", config = OtpUserConfig.class)
+    ManagedUser otpUser;
+
     @InjectOAuthClient
     OAuthClient oauthClient;
 
     @BeforeEach
     public void resetUserAndFailures() {
+        resetUser(user);
+        resetUser(otpUser);
+        managedRealm.admin().attackDetection().clearAllBruteForce();
+    }
+
+    private static void resetUser(ManagedUser user) {
         UserRepresentation rep = user.admin().toRepresentation();
         rep.setEnabled(true);
         if (rep.getAttributes() != null) {
             rep.getAttributes().remove(UserModel.DISABLED_REASON);
         }
         user.admin().update(rep);
-        managedRealm.admin().attackDetection().clearAllBruteForce();
     }
 
     @Test
@@ -96,6 +104,24 @@ public class AttackDetectionAuthChannelTest {
         assertChannelFailures(detection, OTP_CHANNEL, 0);
         assertChannelLocked(detection, PASSWORD_CHANNEL, true);
         assertChannelLocked(detection, OTP_CHANNEL, false);
+    }
+
+    @Test
+    public void failedOtpIncrementsOnlyOtpAndDoesNotBlockPassword() {
+        AttackDetectionResource detection = managedRealm.admin().attackDetection();
+
+        failOtpLogin(2);
+
+        assertChannelFailures(detection, otpUser, OTP_CHANNEL, 2);
+        assertChannelFailures(detection, otpUser, PASSWORD_CHANNEL, 0);
+        assertChannelLocked(detection, otpUser, OTP_CHANNEL, true);
+        assertChannelLocked(detection, otpUser, PASSWORD_CHANNEL, false);
+
+        oauthClient.doPasswordGrantRequest(otpUser.getUsername(), "invalid");
+
+        await().atMost(10, TimeUnit.SECONDS)
+                .pollInterval(100, TimeUnit.MILLISECONDS)
+                .untilAsserted(() -> assertChannelFailures(detection, otpUser, PASSWORD_CHANNEL, 1));
     }
 
     @Test
@@ -241,6 +267,17 @@ public class AttackDetectionAuthChannelTest {
         }
     }
 
+    private void failOtpLogin(int attempts) {
+        AttackDetectionResource detection = managedRealm.admin().attackDetection();
+        for (int i = 0; i < attempts; i++) {
+            oauthClient.passwordGrantRequest(otpUser.getUsername(), PASSWORD).otp("invalid").send();
+            int expected = i + 1;
+            await().atMost(10, TimeUnit.SECONDS)
+                    .pollInterval(100, TimeUnit.MILLISECONDS)
+                    .untilAsserted(() -> assertChannelFailures(detection, otpUser, OTP_CHANNEL, expected));
+        }
+    }
+
     private void withProtectedChannels(List<String> channels, Runnable test) {
         RealmRepresentation realm = managedRealm.admin().toRepresentation();
         List<String> previous = List.copyOf(realm.getBruteForceProtectedAuthChannels());
@@ -270,13 +307,21 @@ public class AttackDetectionAuthChannelTest {
     }
 
     private void assertChannelLocked(AttackDetectionResource detection, String channel, boolean expected) {
-        assertEquals(expected,
-                channels(detection.bruteForceUserStatus(user.getId())).get(channel).get("disabled"));
+        assertChannelLocked(detection, user, channel, expected);
+    }
+
+    private static void assertChannelLocked(AttackDetectionResource detection, ManagedUser user, String channel,
+            boolean expected) {
+        assertEquals(expected, channels(detection.bruteForceUserStatus(user.getId())).get(channel).get("disabled"));
     }
 
     private void assertChannelFailures(AttackDetectionResource detection, String channel, int expected) {
-        assertEquals(expected,
-                channels(detection.bruteForceUserStatus(user.getId())).get(channel).get("numFailures"));
+        assertChannelFailures(detection, user, channel, expected);
+    }
+
+    private static void assertChannelFailures(AttackDetectionResource detection, ManagedUser user, String channel,
+            int expected) {
+        assertEquals(expected, channels(detection.bruteForceUserStatus(user.getId())).get(channel).get("numFailures"));
     }
 
     @SuppressWarnings("unchecked")
@@ -312,6 +357,19 @@ public class AttackDetectionAuthChannelTest {
                     .email("channel-user@example.com")
                     .emailVerified(true)
                     .password(PASSWORD);
+        }
+    }
+
+    public static class OtpUserConfig implements UserConfig {
+
+        @Override
+        public UserBuilder configure(UserBuilder user) {
+            return user.username("otp-channel-user")
+                    .name("OTP Channel", "User")
+                    .email("otp-channel-user@example.com")
+                    .emailVerified(true)
+                    .password(PASSWORD)
+                    .totpSecret("DJmQfC73VGFhw7D4QJ8A");
         }
     }
 }

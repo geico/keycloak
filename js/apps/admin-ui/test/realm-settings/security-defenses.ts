@@ -34,6 +34,25 @@ export async function selectBruteForceMode(page: Page, mode: string) {
   await selectItem(page, "#kc-brute-force-mode", mode);
 }
 
+export async function selectProtectedAuthChannels(
+  page: Page,
+  channels: string[],
+) {
+  await page.locator("#bruteForceProtectedAuthChannels").click();
+  for (const channel of channels) {
+    await page.getByRole("option", { name: channel, exact: true }).click();
+  }
+  await page.keyboard.press("Escape");
+}
+
+export async function selectAuthChannelLockScope(page: Page, scope: string) {
+  await selectItem(page, "#bruteForceChannelLockScope", scope);
+}
+
+export async function fillMaxChannelFailures(page: Page, value: string) {
+  await page.locator("#bruteForceChannelFailureFactor input").fill(value);
+}
+
 export async function fillWaitIncrementSeconds(page: Page, value: string) {
   await page.getByTestId("waitIncrementSeconds").fill(value);
 }

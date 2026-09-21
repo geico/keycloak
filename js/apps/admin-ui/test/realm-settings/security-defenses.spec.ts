@@ -1,4 +1,4 @@
-import { test } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 import { v4 as uuid } from "uuid";
 import adminClient from "../utils/AdminClient.ts";
 import { login } from "../utils/login.ts";
@@ -10,6 +10,9 @@ import {
   assertXFrameOptionsSecurityHeaderValue,
   clickSaveSecurityDefenses,
   selectBruteForceMode,
+  selectProtectedAuthChannels,
+  selectAuthChannelLockScope,
+  fillMaxChannelFailures,
   fillMaxDeltaTimeSeconds,
   fillMaxFailureWaitSeconds,
   fillMinimumQuickLoginWaitSeconds,
@@ -36,6 +39,10 @@ test.describe.serial("Security defenses", () => {
     await clickSaveSecurityDefenses(page);
     await assertNotificationMessage(page, "Realm successfully updated");
     await assertXFrameOptionsSecurityHeaderValue(page, "DENY");
+    expect(
+      (await adminClient.getRealm(realmName))?.browserSecurityHeaders
+        ?.xFrameOptions,
+    ).toBe("DENY");
   });
 
   test("Brute force detection", async ({ page }) => {
@@ -45,8 +52,16 @@ test.describe.serial("Security defenses", () => {
     await fillMaxFailureWaitSeconds(page, "1");
     await fillMaxDeltaTimeSeconds(page, "1");
     await fillMinimumQuickLoginWaitSeconds(page, "1");
+    await selectProtectedAuthChannels(page, ["password", "otp"]);
+    await selectAuthChannelLockScope(page, "Lock only that channel");
+    await fillMaxChannelFailures(page, "2");
     await clickSaveBruteForce(page);
     await assertNotificationMessage(page, "Realm successfully updated");
+
+    const realm = await adminClient.getRealm(realmName);
+    expect(realm?.bruteForceProtectedAuthChannels).toEqual(["password", "otp"]);
+    expect(realm?.bruteForceChannelLockScope).toBe("CHANNEL");
+    expect(realm?.bruteForceChannelFailureFactor).toBe(2);
   });
 
   test("Realm header settings followed by Brute force detection", async ({
@@ -64,5 +79,9 @@ test.describe.serial("Security defenses", () => {
 
     await goToSecurityDefensesTab(page);
     await assertXFrameOptionsSecurityHeaderValue(page, "ALLOW-FROM foo");
+    expect(
+      (await adminClient.getRealm(realmName))?.browserSecurityHeaders
+        ?.xFrameOptions,
+    ).toBe("ALLOW-FROM foo");
   });
 });

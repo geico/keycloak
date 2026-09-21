@@ -48,6 +48,7 @@ describe("Attack Detection", () => {
           failedLoginNotBefore: 0,
         },
       },
+      channels: {},
     });
   });
 
