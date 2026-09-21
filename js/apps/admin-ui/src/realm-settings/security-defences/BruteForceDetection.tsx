@@ -106,7 +106,7 @@ export const BruteForceDetection = ({
     );
     setIsBruteForceModeUpdated(false);
   };
-  useEffect(setupForm, [realm]);
+  useEffect(setupForm, [realm, setValue]);
 
   const lockPolicy = form.watch("bruteForceLockPolicy") ?? "USER";
   const protectedChannels: string[] =
