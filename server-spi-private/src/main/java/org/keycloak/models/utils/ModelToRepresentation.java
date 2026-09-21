@@ -173,6 +173,9 @@ public class ModelToRepresentation {
         REALM_EXCLUDED_ATTRIBUTES.add("maxSecondaryAuthFailures");
         REALM_EXCLUDED_ATTRIBUTES.add("bruteForceProtectedUserProperties");
         REALM_EXCLUDED_ATTRIBUTES.add("bruteForceLockPolicy");
+        REALM_EXCLUDED_ATTRIBUTES.add("bruteForceChannelFailureFactor");
+        REALM_EXCLUDED_ATTRIBUTES.add("bruteForceProtectedAuthChannels");
+        REALM_EXCLUDED_ATTRIBUTES.add("bruteForceChannelLockScope");
         REALM_EXCLUDED_ATTRIBUTES.add("actionTokenGeneratedByAdminLifespan");
         REALM_EXCLUDED_ATTRIBUTES.add("actionTokenGeneratedByUserLifespan");
         REALM_EXCLUDED_ATTRIBUTES.add("offlineSessionMaxLifespanEnabled");
@@ -519,6 +522,11 @@ public class ModelToRepresentation {
         rep.setMaxSecondaryAuthFailures(realm.getMaxSecondaryAuthFailures());
         rep.setBruteForceProtectedUserProperties(realm.getBruteForceProtectedUserProperties());
         rep.setBruteForceLockPolicy(realm.getBruteForceLockPolicy());
+        if (realm.getAttribute("bruteForceChannelFailureFactor") != null) {
+            rep.setBruteForceChannelFailureFactor(realm.getBruteForceChannelFailureFactor());
+        }
+        rep.setBruteForceProtectedAuthChannels(realm.getBruteForceProtectedAuthChannels());
+        rep.setBruteForceChannelLockScope(realm.getBruteForceChannelLockScope());
         if (Profile.isFeatureEnabled(Profile.Feature.AUTHORIZATION)) {
             rep.setUserManagedAccessAllowed(realm.isUserManagedAccessAllowed());
         } else {

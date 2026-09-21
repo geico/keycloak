@@ -37,6 +37,8 @@ export default interface RealmRepresentation {
   bruteForceProtected?: boolean;
   bruteForceProtectedUserProperties?: string[];
   bruteForceLockPolicy?: "USER" | "PROPERTIES" | "ANY";
+  bruteForceProtectedAuthChannels?: string[];
+  bruteForceChannelLockScope?: "ACCOUNT" | "CHANNEL";
   clientAuthenticationFlow?: string;
   clientScopeMappings?: Record<string, any>;
   // ClientScopeRepresentation
@@ -66,6 +68,7 @@ export default interface RealmRepresentation {
   eventsListeners?: string[];
   failureFactor?: number;
   bruteForcePropertyFailureFactor?: number;
+  bruteForceChannelFailureFactor?: number;
   maxSecondaryAuthFailures?: number;
   federatedUsers?: UserRepresentation[];
   groups?: GroupRepresentation[];

@@ -4,15 +4,17 @@
 Breaking changes are identified as those that might require changes for existing users to their configurations or applications.
 In minor or patch releases, {project_name} will only introduce breaking changes to fix bugs.
 
-=== Brute-force user status includes property counters
+=== Brute-force user status includes property and channel counters
 
-The response from `GET /admin/realms/\{realm}/attack-detection/brute-force/users/\{userId}` now includes a `properties` object containing the status of each protected user property. With the default lock policy, this object contains the existing per-user counter under the `id` property.
+The response from `GET /admin/realms/\{realm}/attack-detection/brute-force/users/\{userId}` now includes a `properties` object containing the status of each protected user property, and a `channels` object containing the status of each protected authentication channel. With the default lock policy, `properties` contains the existing per-user counter under the `id` property. `channels` is empty until a realm opts in to independent authentication channels.
 
-Clients that deserialize this response into a closed schema or compare the complete JSON object must accept the additional field. Existing top-level fields and the default per-user lock behavior are unchanged.
+Clients that deserialize this response into a closed schema or compare the complete JSON object must accept the additional fields. Existing top-level fields and the default per-user lock behavior are unchanged.
 
 When a lock policy other than the per-user default is enabled, a failed login increments the per-user counter and/or only the submitted identifier, depending on the policy. Identifier counters use `bruteForcePropertyFailureFactor` when set; otherwise they use `failureFactor`.
 
-`BruteForceProtector.failedLogin` and `successfulLogin` gained compatible default methods that receive the attempted identifier. Custom brute-force providers that implement only the previous signatures continue to work.
+When `bruteForceProtectedAuthChannels` lists one or more channels, a failed login also increments the counter of the channel being attempted, using `bruteForceChannelFailureFactor` when set and `failureFactor` otherwise. `bruteForceChannelLockScope` selects whether reaching that threshold disables the account (`ACCOUNT`, the default) or blocks only that channel (`CHANNEL`). With `CHANNEL`, failures on a protected channel are kept out of the account counters, so those failures no longer contribute to permanent account lockout or to `maxSecondaryAuthFailures`.
+
+`BruteForceProtector.failedLogin` and `successfulLogin` gained compatible default methods that receive the attempted identifier, and `isTemporarilyDisabled` and `isPermanentlyLockedOut` gained compatible default methods that receive the authentication channel. Custom brute-force providers that implement only the previous signatures continue to work and keep their account-wide behavior.
 
 === Client scope assignment now enforces client scope permissions
 

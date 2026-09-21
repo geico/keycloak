@@ -178,10 +178,17 @@ export default function EditUser() {
           ? ["id"]
           : [];
 
+      const lockedChannels = attackDetection.channels
+        ? Object.entries(attackDetection.channels)
+            .filter(([, status]) => (status as { disabled?: boolean }).disabled)
+            .map(([channel]) => channel)
+        : [];
+
       setBruteForced({
         isBruteForceProtected,
         isLocked,
         lockedProperties,
+        lockedChannels,
       });
       setRealmHasOrganizations(organizations.length === 1);
 

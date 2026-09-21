@@ -234,6 +234,9 @@ public class DefaultExportImportManager implements ExportImportManager {
         if (rep.getMaxSecondaryAuthFailures() != null) newRealm.setMaxSecondaryAuthFailures(checkNonNegativeNumber(rep.getMaxSecondaryAuthFailures(),"Maximum secondary authentication failures"));
         if (rep.getBruteForceProtectedUserProperties() != null) newRealm.setBruteForceProtectedUserProperties(rep.getBruteForceProtectedUserProperties());
         if (rep.getBruteForceLockPolicy() != null) newRealm.setBruteForceLockPolicy(rep.getBruteForceLockPolicy());
+        if (rep.getBruteForceChannelFailureFactor() != null) newRealm.setBruteForceChannelFailureFactor(checkNonNegativeNumber(rep.getBruteForceChannelFailureFactor(),"Channel failure factor"));
+        if (rep.getBruteForceProtectedAuthChannels() != null) newRealm.setBruteForceProtectedAuthChannels(rep.getBruteForceProtectedAuthChannels());
+        if (rep.getBruteForceChannelLockScope() != null) newRealm.setBruteForceChannelLockScope(rep.getBruteForceChannelLockScope());
         if (rep.isEventsEnabled() != null) newRealm.setEventsEnabled(rep.isEventsEnabled());
         if (rep.getEnabledEventTypes() != null)
             newRealm.setEnabledEventTypes(new HashSet<>(rep.getEnabledEventTypes()));
@@ -843,6 +846,9 @@ public class DefaultExportImportManager implements ExportImportManager {
         if (rep.getMaxSecondaryAuthFailures() != null) realm.setMaxSecondaryAuthFailures(checkNonNegativeNumber(rep.getMaxSecondaryAuthFailures(), "Maximum secondary authentication failures"));
         if (rep.getBruteForceProtectedUserProperties() != null) realm.setBruteForceProtectedUserProperties(rep.getBruteForceProtectedUserProperties());
         if (rep.getBruteForceLockPolicy() != null) realm.setBruteForceLockPolicy(rep.getBruteForceLockPolicy());
+        if (rep.getBruteForceChannelFailureFactor() != null) realm.setBruteForceChannelFailureFactor(checkNonNegativeNumber(rep.getBruteForceChannelFailureFactor(),"Channel failure factor"));
+        if (rep.getBruteForceProtectedAuthChannels() != null) realm.setBruteForceProtectedAuthChannels(rep.getBruteForceProtectedAuthChannels());
+        if (rep.getBruteForceChannelLockScope() != null) realm.setBruteForceChannelLockScope(rep.getBruteForceChannelLockScope());
         if (rep.isRegistrationAllowed() != null) realm.setRegistrationAllowed(rep.isRegistrationAllowed());
         if (rep.isRegistrationEmailAsUsername() != null)
             realm.setRegistrationEmailAsUsername(rep.isRegistrationEmailAsUsername());

@@ -19,6 +19,7 @@ package org.keycloak.services.managers;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -104,6 +105,9 @@ public final class BruteForceUserProperty {
     }
 
     public static int getFailureFactor(RealmModel realm, String failureKey) {
+        if (BruteForceAuthChannel.isChannelKey(failureKey)) {
+            return realm.getBruteForceChannelFailureFactor();
+        }
         if (failureKey != null && failureKey.startsWith(PROPERTY_KEY_PREFIX)) {
             return realm.getBruteForcePropertyFailureFactor();
         }
@@ -194,7 +198,11 @@ public final class BruteForceUserProperty {
 
     public static boolean isLockedByRemainingCounters(KeycloakSession session, RealmModel realm, UserModel user,
             List<String> clearedKeys) {
-        return getFailureKeys(realm, user).stream()
+        List<String> accountKeys = new ArrayList<>(getFailureKeys(realm, user));
+        if (BruteForceAuthChannel.locksAccount(realm)) {
+            accountKeys.addAll(BruteForceAuthChannel.getAllFailureKeys(realm, user));
+        }
+        return accountKeys.stream()
                 .filter(failureKey -> !clearedKeys.contains(failureKey))
                 .anyMatch(failureKey -> {
                     UserLoginFailureModel model = session.loginFailures().getUserLoginFailure(realm, failureKey);

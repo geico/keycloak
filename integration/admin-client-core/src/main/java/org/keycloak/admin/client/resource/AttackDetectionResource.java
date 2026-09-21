@@ -46,6 +46,11 @@ public interface AttackDetectionResource {
     void clearBruteForceForUserByProperty(@PathParam("userId") String userId,
             @QueryParam("property") String property);
 
+    @Path("brute-force/users/{userId}")
+    @DELETE
+    void clearBruteForceForUserByChannel(@PathParam("userId") String userId,
+            @QueryParam("channel") String channel);
+
     @Path("brute-force/users")
     @DELETE
     void clearAllBruteForce();

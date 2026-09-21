@@ -119,7 +119,7 @@ public class AttackDetectionResourceTest {
     private void assertBruteForce(Map<String, Object> status, Integer expectedNumFailures,
             Integer expectedNumTemporaryLockouts, Boolean expectedFailure, Boolean expectedDisabled,
             boolean expectPropertyStatus) {
-        assertEquals(expectPropertyStatus ? 8 : 7, status.size());
+        assertEquals(expectPropertyStatus ? 9 : 7, status.size());
         assertEquals(expectedNumFailures, status.get("numFailures"));
         assertEquals(expectedNumTemporaryLockouts, status.get("numTemporaryLockouts"));
         assertEquals(expectedDisabled, status.get("disabled"));
@@ -131,6 +131,12 @@ public class AttackDetectionResourceTest {
             assertEquals(expectedNumFailures, properties.get("id").get("numFailures"));
             assertEquals(expectedNumTemporaryLockouts, properties.get("id").get("numTemporaryLockouts"));
             assertEquals(expectedDisabled, properties.get("id").get("disabled"));
+
+            // No channel is protected in this realm, so every channel shares the counters above
+            @SuppressWarnings("unchecked")
+            Map<String, Map<String, Object>> channels =
+                    (Map<String, Map<String, Object>>) status.get("channels");
+            assertTrue(channels.isEmpty());
         }
         if (expectedFailure) {
             assertEquals("127.0.0.1", status.get("lastIPFailure"));

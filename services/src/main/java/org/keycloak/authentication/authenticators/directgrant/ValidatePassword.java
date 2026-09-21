@@ -36,6 +36,8 @@ import org.keycloak.provider.ProviderConfigProperty;
 import org.keycloak.representations.idm.CredentialRepresentation;
 import org.keycloak.services.managers.AuthenticationManager;
 
+import static org.keycloak.authentication.authenticators.util.AuthenticatorUtils.getDisabledByBruteForceEventError;
+
 /**
  * @author <a href="mailto:bill@burkecentral.com">Bill Burke</a>
  * @version $Revision: 1 $
@@ -46,6 +48,17 @@ public class ValidatePassword extends AbstractDirectGrantAuthenticator {
 
     @Override
     public void authenticate(AuthenticationFlowContext context) {
+        // The account-wide check already happened while looking up the user, but this channel can be
+        // blocked on its own while the rest of the account stays usable.
+        String bruteForceError = getDisabledByBruteForceEventError(context, context.getUser());
+        if (bruteForceError != null) {
+            context.getEvent().user(context.getUser());
+            context.getEvent().error(bruteForceError);
+            Response challengeResponse = errorResponse(Response.Status.BAD_REQUEST.getStatusCode(), "invalid_grant", "Invalid user credentials");
+            context.failure(AuthenticationFlowError.INVALID_USER, challengeResponse);
+            return;
+        }
+
         String password = retrievePassword(context);
         boolean valid = context.getUser().credentialManager().isValid(UserCredentialModel.password(password));
         if (!valid) {

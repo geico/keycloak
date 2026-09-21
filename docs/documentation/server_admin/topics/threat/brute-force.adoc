@@ -51,7 +51,7 @@ Use shared properties only when locking every user with the same value is intend
 Property counters belong to the property value, not to an individual user. Changing a user's property does not delete the counter for the old value, and the user inherits any existing counter for the new value. Use *User or shared properties* when users must remain protected by their stable user id after a property changes.
 ====
 
-Locking by user property does not create separate counters for authentication methods or delivery channels. For example, email OTP and SMS OTP attempts are not counted independently.
+Locking by user property does not create separate counters for authentication methods. To give each method its own budget, see <<_brute-force-auth-channels, Independent authentication channels>>.
 
 To configure this:
 
@@ -59,6 +59,55 @@ To configure this:
 . Choose a *Lock policy*.
 . If the policy is not *This user only*, select one or more property ids in *Lock by user properties* and set *Max identifier failures*.
 . Click *Save*.
+
+[[_brute-force-auth-channels]]
+==== Independent authentication channels
+
+By default every authentication method shares one failure counter, so failed password guesses and failed OTP codes consume the same budget. You can instead give selected methods their own counter, which means attempts against one method do not lock the others.
+
+A channel is identified by the *reference category* of the authenticator that failed, which is the credential type it verifies:
+
+|===
+|Channel |Authenticators
+
+|`password`
+|Username/password form, password form, direct grant password
+
+|`otp`
+|OTP form, conditional OTP form, direct grant OTP
+
+|`recovery-authn-codes`
+|Recovery authentication codes form
+|===
+
+A custom authenticator uses the category it declares, so an SMS OTP or email OTP provider that declares its own category gets its own counter without any extra registration. A provider that reuses the `otp` category shares the counter with the OTP form.
+
+*Max channel failures* is the threshold for a channel counter, independent from *Max login failures* and *Max identifier failures*.
+
+*Channel lock scope* decides what a channel does when it reaches that threshold:
+
+* *Lock the account* -- the failures also count against the account, so reaching the channel threshold disables login entirely. Use this to add a tighter, method-specific threshold on top of the account threshold.
+* *Lock only that channel* -- further attempts on that channel are blocked and the remaining channels stay usable. The account counter is not incremented for protected channels, so the account is not disabled by these failures.
+
+[WARNING]
+====
+With *Lock only that channel*, an attacker gets *Max channel failures* attempts on every protected channel instead of a single shared budget. Set the threshold accordingly, and keep the channels that verify a guessable secret (such as `password`) protected so they cannot be retried indefinitely.
+
+Channel counters combine with the lock policy: a channel counter exists per account counter and per protected property counter, so users that share a property value also share that property's channel counters.
+====
+
+Channel counters follow the brute force mode in use, so the configured wait times and temporary lockout behavior apply to a blocked channel as well. A channel blocked under *Lock only that channel* leaves the user account enabled; permanent account lockout and *Maximum Secondary Authentication Failures* remain driven by the account counters.
+
+A successful login clears every channel counter of that user.
+
+To configure this:
+
+. Enable a brute force mode other than *Disabled*.
+. Select one or more channel ids in *Independent authentication channels*.
+. Choose a *Channel lock scope* and set *Max channel failures*.
+. Click *Save*.
+
+Administrators can see which channels are currently blocked on the user details page and clear a single channel there, or with `DELETE /admin/realms/{realm}/attack-detection/brute-force/users/{userId}?channel={channel}`.
 
 ==== Lockout permanently
 {project_name} disables a user account (blocking log in attempts) until an administrator re-enables it.

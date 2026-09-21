@@ -53,6 +53,7 @@ export type BruteForced = {
   isBruteForceProtected?: boolean;
   isLocked?: boolean;
   lockedProperties?: string[];
+  lockedChannels?: string[];
 };
 
 export type UserFormProps = {
@@ -70,10 +71,16 @@ export const UserForm = ({
   form,
   realm,
   user,
-  bruteForce: { isBruteForceProtected, isLocked, lockedProperties } = {
+  bruteForce: {
+    isBruteForceProtected,
+    isLocked,
+    lockedProperties,
+    lockedChannels,
+  } = {
     isBruteForceProtected: false,
     isLocked: false,
     lockedProperties: [],
+    lockedChannels: [],
   },
   userProfileMetadata,
   save,
@@ -104,6 +111,9 @@ export const UserForm = ({
   const [lockedPropertyNames, setLockedPropertyNames] = useState(
     lockedProperties ?? (isLocked ? ["id"] : []),
   );
+  const [lockedChannelNames, setLockedChannelNames] = useState(
+    lockedChannels ?? [],
+  );
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -114,6 +124,10 @@ export const UserForm = ({
     setLockedPropertyNames(lockedProperties ?? (isLocked ? ["id"] : []));
   }, [lockedProperties, isLocked]);
 
+  useEffect(() => {
+    setLockedChannelNames(lockedChannels ?? []);
+  }, [lockedChannels]);
+
   const unlockProperty = async (property: string) => {
     try {
       await adminClient.attackDetection.delByProperty({
@@ -122,6 +136,24 @@ export const UserForm = ({
       });
       setLockedPropertyNames((properties) =>
         properties.filter((name) => name !== property),
+      );
+      addAlert(t("unlockSuccess"), AlertVariant.success);
+      if (refresh) {
+        refresh();
+      }
+    } catch (error) {
+      addError("unlockError", error);
+    }
+  };
+
+  const unlockChannel = async (channel: string) => {
+    try {
+      await adminClient.attackDetection.delByChannel({
+        id: user!.id!,
+        channel,
+      });
+      setLockedChannelNames((channels) =>
+        channels.filter((name) => name !== channel),
       );
       addAlert(t("unlockSuccess"), AlertVariant.success);
       if (refresh) {
@@ -418,6 +450,29 @@ export const UserForm = ({
                 />
               ))
             )}
+          </FormGroup>
+        )}
+        {isBruteForceProtected && lockedChannelNames.length > 0 && (
+          <FormGroup
+            label={t("lockedAuthChannels")}
+            fieldId="lockedAuthChannels"
+            labelIcon={
+              <HelpItem
+                helpText={t("lockedAuthChannelsHelp")}
+                fieldLabelId="lockedAuthChannels"
+              />
+            }
+          >
+            {lockedChannelNames.map((channel) => (
+              <Switch
+                data-testid={`user-locked-channel-switch-${channel}`}
+                id={`lockedAuthChannel-${channel}`}
+                key={channel}
+                onChange={() => unlockChannel(channel)}
+                isChecked
+                label={channel}
+              />
+            ))}
           </FormGroup>
         )}
         {!user?.id && (

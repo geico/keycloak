@@ -25,6 +25,7 @@ import org.keycloak.models.UserLoginFailureModel;
 import org.keycloak.models.UserModel;
 import org.keycloak.models.utils.ModelToRepresentation;
 import org.keycloak.representations.idm.UserRepresentation;
+import org.keycloak.services.managers.BruteForceAuthChannel;
 import org.keycloak.services.managers.BruteForceProtector;
 import org.keycloak.services.managers.BruteForceUserProperty;
 import org.keycloak.services.resources.admin.fgap.AdminPermissionEvaluator;
@@ -199,7 +200,13 @@ public class BruteForceUsersResource {
                 .isPermanentlyLockedOut(session, realm, user);
         data.put("disabled", disabled);
         int currentTime = Time.currentTime();
-        for (UserLoginFailureModel model : BruteForceUserProperty.getLoginFailures(session, realm, user).toList()) {
+        // Channel counters only belong here when they can disable login, otherwise a user blocked on
+        // a single channel would be listed as locked while still able to log in.
+        Stream<UserLoginFailureModel> failures = BruteForceUserProperty.getLoginFailures(session, realm, user);
+        if (BruteForceAuthChannel.locksAccount(realm)) {
+            failures = Stream.concat(failures, BruteForceAuthChannel.getLoginFailures(session, realm, user));
+        }
+        for (UserLoginFailureModel model : failures.toList()) {
             data.put("numFailures", Math.max((int) data.get("numFailures"), model.getNumFailures()));
             if (latestFailure == null || model.getLastFailure() > latestFailure.getLastFailure()) {
                 latestFailure = model;

@@ -258,6 +258,73 @@ public interface RealmModel extends RoleContainerModel {
         }
         setAttribute("bruteForcePropertyFailureFactor", Integer.toString(failureFactor));
     }
+
+    /**
+     * Authentication channels (the reference category of an authenticator, such as {@code password}
+     * or {@code otp}) that each get a dedicated brute-force failure counter. An empty list keeps the
+     * historical behavior where every channel shares one counter.
+     */
+    default List<String> getBruteForceProtectedAuthChannels() {
+        String value = getAttribute("bruteForceProtectedAuthChannels");
+        if (value == null || value.isBlank()) {
+            return List.of();
+        }
+        return value.lines()
+                .map(String::trim)
+                .filter(channel -> !channel.isEmpty())
+                .distinct()
+                .toList();
+    }
+    default void setBruteForceProtectedAuthChannels(List<String> channels) {
+        List<String> normalized = channels == null
+                ? List.<String>of()
+                : channels.stream()
+                        .map(String::trim)
+                        .filter(channel -> !channel.isEmpty())
+                        .distinct()
+                        .toList();
+        if (normalized.isEmpty()) {
+            removeAttribute("bruteForceProtectedAuthChannels");
+            return;
+        }
+        setAttribute("bruteForceProtectedAuthChannels", String.join("\n", normalized));
+    }
+    /**
+     * What a protected channel locks once it reaches its own threshold. Defaults to
+     * {@link RealmRepresentation.BruteForceChannelLockScope#ACCOUNT}.
+     */
+    default RealmRepresentation.BruteForceChannelLockScope getBruteForceChannelLockScope() {
+        String value = getAttribute("bruteForceChannelLockScope");
+        if (value == null || value.isBlank()) {
+            return RealmRepresentation.BruteForceChannelLockScope.ACCOUNT;
+        }
+        return RealmRepresentation.BruteForceChannelLockScope.valueOf(value);
+    }
+    default void setBruteForceChannelLockScope(RealmRepresentation.BruteForceChannelLockScope scope) {
+        if (scope == null || scope == RealmRepresentation.BruteForceChannelLockScope.ACCOUNT) {
+            removeAttribute("bruteForceChannelLockScope");
+            return;
+        }
+        setAttribute("bruteForceChannelLockScope", scope.name());
+    }
+    /**
+     * Maximum failures for a protected channel counter before that channel locks.
+     * When unset, {@link #getFailureFactor()} is used so existing realms keep a single threshold.
+     */
+    default int getBruteForceChannelFailureFactor() {
+        String value = getAttribute("bruteForceChannelFailureFactor");
+        if (value == null || value.isBlank()) {
+            return getFailureFactor();
+        }
+        return Integer.parseInt(value.trim());
+    }
+    default void setBruteForceChannelFailureFactor(Integer failureFactor) {
+        if (failureFactor == null) {
+            removeAttribute("bruteForceChannelFailureFactor");
+            return;
+        }
+        setAttribute("bruteForceChannelFailureFactor", Integer.toString(failureFactor));
+    }
     //--- end brute force settings
 
 

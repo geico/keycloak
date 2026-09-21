@@ -49,7 +49,26 @@ public interface BruteForceProtector extends Provider {
 
     boolean isTemporarilyDisabled(KeycloakSession session, RealmModel realm, UserModel user);
 
+    /**
+     * Whether login is temporarily blocked for {@code authenticationChannel}, which is the reference
+     * category of the authenticator being executed. Returns the account-wide result for custom
+     * providers that do not track channels separately.
+     */
+    default boolean isTemporarilyDisabled(KeycloakSession session, RealmModel realm, UserModel user,
+            String authenticationChannel) {
+        return isTemporarilyDisabled(session, realm, user);
+    }
+
     boolean isPermanentlyLockedOut(KeycloakSession session, RealmModel realm, UserModel user);
+
+    /**
+     * Whether {@code authenticationChannel} exhausted its attempts. Returns the account-wide result
+     * for custom providers that do not track channels separately.
+     */
+    default boolean isPermanentlyLockedOut(KeycloakSession session, RealmModel realm, UserModel user,
+            String authenticationChannel) {
+        return isPermanentlyLockedOut(session, realm, user);
+    }
 
     /**
      * Clears any remaining traces of the permanent lockout. Does not enable the user as such!

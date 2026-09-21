@@ -443,6 +443,21 @@ public class RealmBuilder extends Builder<RealmRepresentation> {
         return this;
     }
 
+    public RealmBuilder bruteForceChannelFailureFactor(int count) {
+        rep.setBruteForceChannelFailureFactor(count);
+        return this;
+    }
+
+    public RealmBuilder bruteForceProtectedAuthChannels(String... channels) {
+        rep.setBruteForceProtectedAuthChannels(List.of(channels));
+        return this;
+    }
+
+    public RealmBuilder bruteForceChannelLockScope(RealmRepresentation.BruteForceChannelLockScope scope) {
+        rep.setBruteForceChannelLockScope(scope);
+        return this;
+    }
+
     public RealmBuilder maxSecondaryAuthFailures(int count) {
         rep.setMaxSecondaryAuthFailures(count);
         return this;

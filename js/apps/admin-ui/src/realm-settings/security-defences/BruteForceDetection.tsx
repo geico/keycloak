@@ -30,6 +30,10 @@ const BUILT_IN_USER_PROPERTIES = [
   "lastName",
 ];
 
+// Categories the server tracks for brute force. Custom authenticators report their own category,
+// which is preserved in the options once configured.
+const BUILT_IN_AUTH_CHANNELS = ["password", "otp", "recovery-authn-codes"];
+
 type BruteForceDetectionProps = {
   realm: RealmRepresentation;
   save: (realm: RealmRepresentation) => void;
@@ -67,6 +71,14 @@ export const BruteForceDetection = ({
     return [...names];
   }, [userProfile, realm.bruteForceProtectedUserProperties]);
 
+  const lockChannelOptions = useMemo(() => {
+    const names = new Set(BUILT_IN_AUTH_CHANNELS);
+    realm.bruteForceProtectedAuthChannels?.forEach((channel) =>
+      names.add(channel),
+    );
+    return [...names];
+  }, [realm.bruteForceProtectedAuthChannels]);
+
   enum BruteForceMode {
     Disabled = "Disabled",
     PermanentLockout = "PermanentLockout",
@@ -83,15 +95,22 @@ export const BruteForceDetection = ({
 
   const bruteForceStrategyTypes = ["MULTIPLE", "LINEAR"];
   const bruteForceLockPolicies = ["USER", "PROPERTIES", "ANY"] as const;
+  const bruteForceChannelLockScopes = ["ACCOUNT", "CHANNEL"] as const;
 
   const setupForm = () => {
     convertToFormValues(realm, setValue);
     setValue("bruteForceLockPolicy", realm.bruteForceLockPolicy ?? "USER");
+    setValue(
+      "bruteForceChannelLockScope",
+      realm.bruteForceChannelLockScope ?? "ACCOUNT",
+    );
     setIsBruteForceModeUpdated(false);
   };
   useEffect(setupForm, [realm]);
 
   const lockPolicy = form.watch("bruteForceLockPolicy") ?? "USER";
+  const protectedChannels: string[] =
+    form.watch("bruteForceProtectedAuthChannels") ?? [];
 
   const bruteForceMode = (() => {
     if (!form.getValues("bruteForceProtected")) {
@@ -181,7 +200,10 @@ export const BruteForceDetection = ({
                 label={t("bruteForcePropertyFailureFactor")}
                 labelIcon={t("bruteForcePropertyFailureFactorHelp")}
                 controller={{
-                  defaultValue: realm.bruteForcePropertyFailureFactor ?? realm.failureFactor ?? 0,
+                  defaultValue:
+                    realm.bruteForcePropertyFailureFactor ??
+                    realm.failureFactor ??
+                    0,
                   rules: { required: t("required"), min: 0 },
                 }}
               />
@@ -225,6 +247,46 @@ export const BruteForceDetection = ({
                 }}
                 options={lockPropertyOptions}
               />
+            )}
+            <SelectControl
+              name="bruteForceProtectedAuthChannels"
+              label={t("bruteForceProtectedAuthChannels")}
+              labelIcon={t("bruteForceProtectedAuthChannelsHelp")}
+              controller={{ defaultValue: [] }}
+              variant={SelectVariant.typeaheadMulti}
+              placeholderText={t("bruteForceProtectedAuthChannelsPlaceholder")}
+              chipGroupProps={{
+                numChips: 3,
+                expandedText: t("hide"),
+                collapsedText: t("showRemaining"),
+              }}
+              options={lockChannelOptions}
+            />
+            {protectedChannels.length > 0 && (
+              <>
+                <SelectControl
+                  name="bruteForceChannelLockScope"
+                  label={t("bruteForceChannelLockScope")}
+                  labelIcon={t("bruteForceChannelLockScopeHelp")}
+                  controller={{ defaultValue: "ACCOUNT" }}
+                  options={bruteForceChannelLockScopes.map((key) => ({
+                    key,
+                    value: t(`bruteForceChannelLockScope.${key}`),
+                  }))}
+                />
+                <NumberControl
+                  name="bruteForceChannelFailureFactor"
+                  label={t("bruteForceChannelFailureFactor")}
+                  labelIcon={t("bruteForceChannelFailureFactorHelp")}
+                  controller={{
+                    defaultValue:
+                      realm.bruteForceChannelFailureFactor ??
+                      realm.failureFactor ??
+                      0,
+                    rules: { required: t("required"), min: 0 },
+                  }}
+                />
+              </>
             )}
             {bruteForceMode ===
               BruteForceMode.PermanentAfterTemporaryLockout && (

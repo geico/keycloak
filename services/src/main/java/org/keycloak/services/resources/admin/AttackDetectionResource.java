@@ -16,12 +16,14 @@
  */
 package org.keycloak.services.resources.admin;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Stream;
 
 import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.DELETE;
@@ -41,6 +43,7 @@ import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.RealmModel;
 import org.keycloak.models.UserLoginFailureModel;
 import org.keycloak.models.UserModel;
+import org.keycloak.services.managers.BruteForceAuthChannel;
 import org.keycloak.services.managers.BruteForceProtector;
 import org.keycloak.services.managers.BruteForceUserProperty;
 import org.keycloak.services.resources.KeycloakOpenAPI;
@@ -128,9 +131,15 @@ public class AttackDetectionResource {
         }
         data.put("properties", properties);
 
+        Map<String, Map<String, Object>> channels = new LinkedHashMap<>();
+        for (String channel : BruteForceAuthChannel.getProtectedChannels(realm)) {
+            channels.put(channel, bruteForceChannelStatus(user, channel));
+        }
+        data.put("channels", channels);
+
         UserLoginFailureModel latestFailure = null;
         int failedLoginNotBefore = 0;
-        for (UserLoginFailureModel model : BruteForceUserProperty.getLoginFailures(session, realm, user).toList()) {
+        for (UserLoginFailureModel model : getAccountLoginFailures(user)) {
             data.put("numFailures", Math.max((int) data.get("numFailures"), model.getNumFailures()));
             data.put("numSecondaryAuthFailures",
                     Math.max((int) data.get("numSecondaryAuthFailures"), model.getNumSecondaryAuthFailures()));
@@ -155,7 +164,27 @@ public class AttackDetectionResource {
         return data;
     }
 
+    /**
+     * Counters the top-level status summarizes. Channel counters are only part of it when they can
+     * disable login, so that the summary stays consistent with the reported lock state.
+     */
+    private List<UserLoginFailureModel> getAccountLoginFailures(UserModel user) {
+        Stream<UserLoginFailureModel> failures = BruteForceUserProperty.getLoginFailures(session, realm, user);
+        if (BruteForceAuthChannel.locksAccount(realm)) {
+            failures = Stream.concat(failures, BruteForceAuthChannel.getLoginFailures(session, realm, user));
+        }
+        return failures.toList();
+    }
+
     private Map<String, Object> bruteForcePropertyStatus(UserModel user, String property) {
+        return bruteForceCounterStatus(BruteForceUserProperty.getFailureKeys(realm, user, property));
+    }
+
+    private Map<String, Object> bruteForceChannelStatus(UserModel user, String channel) {
+        return bruteForceCounterStatus(BruteForceAuthChannel.getFailureKeys(realm, user, channel));
+    }
+
+    private Map<String, Object> bruteForceCounterStatus(List<String> failureKeys) {
         Map<String, Object> data = new HashMap<>();
         data.put("disabled", false);
         data.put("numFailures", 0);
@@ -168,7 +197,7 @@ public class AttackDetectionResource {
         UserLoginFailureModel latestFailure = null;
         int failedLoginNotBefore = 0;
         boolean permanentlyLocked = false;
-        for (String failureKey : BruteForceUserProperty.getFailureKeys(realm, user, property)) {
+        for (String failureKey : failureKeys) {
             UserLoginFailureModel model = session.loginFailures().getUserLoginFailure(realm, failureKey);
             if (model == null) {
                 continue;
@@ -222,13 +251,18 @@ public class AttackDetectionResource {
      *
      * @param userId
      * @param property optional protected user property to clear; clears every protected property when omitted
+     * @param channel optional protected authentication channel to clear; clears every channel when omitted
      */
     @Path("brute-force/users/{userId}")
     @DELETE
     @Tag(name = KeycloakOpenAPI.Admin.Tags.ATTACK_DETECTION)
     @Operation( summary="Clear any user login failures for the user This can release temporary disabled user")
     public void clearBruteForceForUser(@PathParam("userId") String userId,
-            @QueryParam("property") String property) {
+            @QueryParam("property") String property,
+            @QueryParam("channel") String channel) {
+        if (property != null && channel != null) {
+            throw new BadRequestException("Only one of 'property' and 'channel' can be cleared at a time");
+        }
         UserModel user = session.users().getUserById(realm, userId);
         if (user == null) {
             auth.users().requireManage();
@@ -248,9 +282,7 @@ public class AttackDetectionResource {
                 : List.of(property);
         List<String> clearedKeys;
         try {
-            clearedKeys = property == null
-                    ? BruteForceUserProperty.getFailureKeys(realm, user)
-                    : BruteForceUserProperty.getFailureKeys(realm, user, property);
+            clearedKeys = getFailureKeysToClear(user, property, channel);
         } catch (IllegalArgumentException cause) {
             throw new BadRequestException(cause.getMessage(), cause);
         }
@@ -286,6 +318,23 @@ public class AttackDetectionResource {
         if (removed || released) {
             adminEvent.operation(OperationType.DELETE).resourcePath(session.getContext().getUri()).success();
         }
+    }
+
+    /**
+     * Clearing a single property also clears that property's per-channel counters, so unlocking an
+     * identifier does not leave the user blocked on one channel.
+     */
+    private List<String> getFailureKeysToClear(UserModel user, String property, String channel) {
+        if (channel != null) {
+            return BruteForceAuthChannel.getFailureKeys(realm, user, channel);
+        }
+
+        List<String> baseKeys = property == null
+                ? BruteForceUserProperty.getFailureKeys(realm, user)
+                : BruteForceUserProperty.getFailureKeys(realm, user, property);
+        List<String> keys = new ArrayList<>(baseKeys);
+        keys.addAll(BruteForceAuthChannel.getFailureKeysForBaseKeys(realm, baseKeys));
+        return keys;
     }
 
     /**

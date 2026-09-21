@@ -104,6 +104,9 @@ public class RealmRepresentation {
     protected Integer maxSecondaryAuthFailures;
     protected List<String> bruteForceProtectedUserProperties;
     protected BruteForceLockPolicy bruteForceLockPolicy;
+    protected Integer bruteForceChannelFailureFactor;
+    protected List<String> bruteForceProtectedAuthChannels;
+    protected BruteForceChannelLockScope bruteForceChannelLockScope;
     //--- end brute force settings
 
     @Deprecated
@@ -892,6 +895,30 @@ public class RealmRepresentation {
         this.bruteForceLockPolicy = bruteForceLockPolicy;
     }
 
+    public Integer getBruteForceChannelFailureFactor() {
+        return bruteForceChannelFailureFactor;
+    }
+
+    public void setBruteForceChannelFailureFactor(Integer bruteForceChannelFailureFactor) {
+        this.bruteForceChannelFailureFactor = bruteForceChannelFailureFactor;
+    }
+
+    public List<String> getBruteForceProtectedAuthChannels() {
+        return bruteForceProtectedAuthChannels;
+    }
+
+    public void setBruteForceProtectedAuthChannels(List<String> bruteForceProtectedAuthChannels) {
+        this.bruteForceProtectedAuthChannels = bruteForceProtectedAuthChannels;
+    }
+
+    public BruteForceChannelLockScope getBruteForceChannelLockScope() {
+        return bruteForceChannelLockScope;
+    }
+
+    public void setBruteForceChannelLockScope(BruteForceChannelLockScope bruteForceChannelLockScope) {
+        this.bruteForceChannelLockScope = bruteForceChannelLockScope;
+    }
+
     public Boolean isEventsEnabled() {
         return eventsEnabled;
     }
@@ -1602,5 +1629,15 @@ public class RealmRepresentation {
      */
     public enum BruteForceLockPolicy {
         USER, PROPERTIES, ANY;
+    }
+
+    /**
+     * What a protected authentication channel locks when its own failure threshold is reached.
+     * {@code ACCOUNT} keeps the historical behavior where the failures disable login entirely.
+     * {@code CHANNEL} blocks only further attempts on that channel and leaves the remaining
+     * channels usable.
+     */
+    public enum BruteForceChannelLockScope {
+        ACCOUNT, CHANNEL;
     }
 }
