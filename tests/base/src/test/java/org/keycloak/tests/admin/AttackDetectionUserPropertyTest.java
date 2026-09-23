@@ -44,6 +44,7 @@ import org.keycloak.testframework.realm.RealmBuilder;
 import org.keycloak.testframework.realm.RealmConfig;
 import org.keycloak.testframework.realm.UserBuilder;
 import org.keycloak.testframework.realm.UserConfig;
+import org.keycloak.util.JsonSerialization;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -227,6 +228,96 @@ public class AttackDetectionUserPropertyTest {
             realm.setBruteForcePropertyPolicies(Map.of(ID, policy));
 
             assertThrows(BadRequestException.class, () -> managedRealm.admin().update(realm));
+        });
+    }
+
+    @Test
+    public void propertyPolicyJsonRoundTripsEveryField() throws Exception {
+        RealmRepresentation imported = JsonSerialization.readValue(
+                getClass().getResourceAsStream("brute-force-property-policies.json"), RealmRepresentation.class);
+        BruteForcePolicyRepresentation emailPolicy = imported.getBruteForcePropertyPolicies().get(UserModel.EMAIL);
+        withProtectedProperties(imported.getBruteForceProtectedUserProperties(), () -> {
+            withPropertyPolicies(imported.getBruteForcePropertyPolicies(), () -> {
+                RealmRepresentation stored = managedRealm.admin().toRepresentation();
+                BruteForcePolicyRepresentation email = stored.getBruteForcePropertyPolicies().get(UserModel.EMAIL);
+                assertEquals(emailPolicy.getFailureFactor(), email.getFailureFactor());
+                assertEquals(emailPolicy.isPermanentLockout(), email.isPermanentLockout());
+                assertEquals(emailPolicy.getMaxTemporaryLockouts(), email.getMaxTemporaryLockouts());
+                assertEquals(emailPolicy.getBruteForceStrategy(), email.getBruteForceStrategy());
+                assertEquals(emailPolicy.getWaitIncrementSeconds(), email.getWaitIncrementSeconds());
+                assertEquals(emailPolicy.getMaxFailureWaitSeconds(), email.getMaxFailureWaitSeconds());
+                assertEquals(emailPolicy.getMaxDeltaTimeSeconds(), email.getMaxDeltaTimeSeconds());
+                assertEquals(emailPolicy.getQuickLoginCheckMilliSeconds(), email.getQuickLoginCheckMilliSeconds());
+                assertEquals(emailPolicy.getMinimumQuickLoginWaitSeconds(), email.getMinimumQuickLoginWaitSeconds());
+            });
+        });
+    }
+
+    @Test
+    public void emptyPropertyPoliciesClearStoredOverrides() {
+        BruteForcePolicyRepresentation emailPolicy = temporaryPolicy(1, 10);
+        withPropertyPolicies(Map.of(UserModel.EMAIL, emailPolicy), () -> {
+            assertEquals(1, managedRealm.admin().toRepresentation()
+                    .getBruteForcePropertyPolicies().get(UserModel.EMAIL).getFailureFactor());
+            withPropertyPolicies(Map.of(), () -> assertTrue(
+                    managedRealm.admin().toRepresentation().getBruteForcePropertyPolicies() == null
+                            || managedRealm.admin().toRepresentation().getBruteForcePropertyPolicies().isEmpty()));
+        });
+    }
+
+    @Test
+    public void removingAProtectedPropertyDropsItsOverride() {
+        BruteForcePolicyRepresentation emailPolicy = temporaryPolicy(1, 10);
+        withPropertyPolicies(Map.of(UserModel.EMAIL, emailPolicy), () -> {
+            RealmRepresentation realm = managedRealm.admin().toRepresentation();
+            List<String> previous = List.copyOf(realm.getBruteForceProtectedUserProperties());
+            realm.setBruteForceProtectedUserProperties(List.of(UserModel.USERNAME));
+            realm.setBruteForcePropertyPolicies(null);
+            managedRealm.admin().update(realm);
+            try {
+                Map<String, BruteForcePolicyRepresentation> policies =
+                        managedRealm.admin().toRepresentation().getBruteForcePropertyPolicies();
+                assertTrue(policies == null || !policies.containsKey(UserModel.EMAIL));
+            } finally {
+                RealmRepresentation restore = managedRealm.admin().toRepresentation();
+                restore.setBruteForceProtectedUserProperties(previous);
+                managedRealm.admin().update(restore);
+            }
+        });
+    }
+
+    @Test
+    public void rejectsNegativePropertyPolicyValues() {
+        BruteForcePolicyRepresentation policy = new BruteForcePolicyRepresentation();
+        policy.setWaitIncrementSeconds(-1);
+        RealmRepresentation realm = managedRealm.admin().toRepresentation();
+        realm.setBruteForcePropertyPolicies(Map.of(UserModel.EMAIL, policy));
+
+        assertThrows(BadRequestException.class, () -> managedRealm.admin().update(realm));
+    }
+
+    @Test
+    public void shortPropertyResetWindowClearsFailuresIndependently() throws Exception {
+        BruteForcePolicyRepresentation emailPolicy = new BruteForcePolicyRepresentation();
+        emailPolicy.setFailureFactor(2);
+        emailPolicy.setPermanentLockout(false);
+        emailPolicy.setWaitIncrementSeconds(60);
+        emailPolicy.setMaxFailureWaitSeconds(60);
+        emailPolicy.setMaxDeltaTimeSeconds(1);
+
+        withPropertyPolicies(Map.of(UserModel.EMAIL, emailPolicy), () -> {
+            AttackDetectionResource detection = managedRealm.admin().attackDetection();
+            String email = salesUser.admin().toRepresentation().getEmail();
+            failLogin(salesUser, email, 1);
+            try {
+                Thread.sleep(1500);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException(e);
+            }
+            failLogin(salesUser, email, 1);
+            assertPropertyFailures(detection, salesUser, UserModel.EMAIL, 1);
+            assertPropertyLocked(detection, salesUser, UserModel.EMAIL, false);
         });
     }
 

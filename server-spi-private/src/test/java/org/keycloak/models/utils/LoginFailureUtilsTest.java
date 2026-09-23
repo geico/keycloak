@@ -61,6 +61,21 @@ public class LoginFailureUtilsTest {
         Assert.assertEquals(300, LoginFailureUtils.getMaxDeltaTimeSeconds(realm));
     }
 
+    @Test
+    public void expirationCutoffUsesTheLongestResetWindow() {
+        BruteForcePolicyRepresentation email = new BruteForcePolicyRepresentation();
+        email.setMaxDeltaTimeSeconds(600);
+        RealmModel realm = realm(false, 0, 300, Map.of("email", email));
+
+        Assert.assertEquals(1_000L, LoginFailureUtils.computeExpirationCutOffTimestampMillis(realm, 601_000L));
+    }
+
+    @Test
+    public void permanentOnlyRealmsNeverExpireFailures() {
+        RealmModel realm = realm(true, 0, 300, Map.of());
+        Assert.assertEquals(-1L, LoginFailureUtils.computeExpirationCutOffTimestampMillis(realm, 1_000L));
+    }
+
     private static RealmModel realm(boolean permanentLockout, int maxTemporaryLockouts, int maxDeltaTimeSeconds,
             Map<String, BruteForcePolicyRepresentation> policies) {
         return realm(permanentLockout, maxTemporaryLockouts, maxDeltaTimeSeconds, policies,

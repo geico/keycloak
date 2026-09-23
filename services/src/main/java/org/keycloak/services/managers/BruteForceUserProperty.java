@@ -182,6 +182,39 @@ public final class BruteForceUserProperty {
             long quickLoginCheckMilliSeconds,
             int maxDeltaTimeSeconds,
             int failureFactor) {
+
+        public boolean isPermanentOnly() {
+            return permanentLockout && maxTemporaryLockouts == 0;
+        }
+
+        public boolean shouldClearFailures(long deltaTime) {
+            return !isPermanentOnly() && deltaTime > maxDeltaTimeSeconds * 1000L;
+        }
+
+        public long waitSeconds(int numFailures) {
+            if (isPermanentOnly() || failureFactor <= 0) {
+                return 0L;
+            }
+            if (RealmRepresentation.BruteForceStrategy.MULTIPLE.equals(strategy)) {
+                return waitIncrementSeconds * ((long) numFailures / failureFactor);
+            }
+            return waitIncrementSeconds * ((long) 1 + numFailures - failureFactor);
+        }
+
+        public boolean isQuickLogin(long lastFailure, long deltaTime, long waitSeconds) {
+            return waitSeconds <= 0 && lastFailure > 0 && deltaTime < quickLoginCheckMilliSeconds;
+        }
+
+        public long lockWaitSeconds(int numFailures, long lastFailure, long deltaTime) {
+            long waitSeconds = waitSeconds(numFailures);
+            if (isQuickLogin(lastFailure, deltaTime, waitSeconds)) {
+                waitSeconds = minimumQuickLoginWaitSeconds;
+            }
+            if (waitSeconds > 0 && (!permanentLockout || maxTemporaryLockouts > 0)) {
+                return Math.min(maxFailureWaitSeconds, waitSeconds);
+            }
+            return waitSeconds;
+        }
     }
 
     /**

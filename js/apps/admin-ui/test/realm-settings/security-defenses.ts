@@ -65,7 +65,12 @@ export async function selectProtectedUserProperties(
 }
 
 export async function configureEmailPropertyPolicy(page: Page) {
-  await page.getByTestId("property-policy-email").click();
+  await page
+    .locator("label")
+    .filter({
+      has: page.getByTestId("property-policy-email"),
+    })
+    .click();
   await selectItem(
     page,
     '[id="bruteForcePropertyPolicyOverrides.email.mode"]',
@@ -76,6 +81,11 @@ export async function configureEmailPropertyPolicy(page: Page) {
       '[id="bruteForcePropertyPolicyOverrides.email.failureFactor"] input',
     )
     .fill("3");
+  await selectItem(
+    page,
+    '[id="bruteForcePropertyPolicyOverrides.email.bruteForceStrategy"]',
+    "Linear",
+  );
   await page
     .getByTestId("bruteForcePropertyPolicyOverrides.email.waitIncrementSeconds")
     .fill("5");
@@ -84,6 +94,19 @@ export async function configureEmailPropertyPolicy(page: Page) {
       "bruteForcePropertyPolicyOverrides.email.maxFailureWaitSeconds",
     )
     .fill("10");
+  await page
+    .getByTestId("bruteForcePropertyPolicyOverrides.email.maxDeltaTimeSeconds")
+    .fill("600");
+  await page
+    .locator(
+      '[id="bruteForcePropertyPolicyOverrides.email.quickLoginCheckMilliSeconds"] input',
+    )
+    .fill("1000");
+  await page
+    .getByTestId(
+      "bruteForcePropertyPolicyOverrides.email.minimumQuickLoginWaitSeconds",
+    )
+    .fill("9");
 }
 
 export async function fillMaxChannelFailures(page: Page, value: string) {

@@ -1,0 +1,24 @@
+{
+  "bruteForceProtected": true,
+  "bruteForceLockPolicy": "PROPERTIES",
+  "bruteForceProtectedUserProperties": ["email", "username"],
+  "bruteForcePropertyFailureFactor": 2,
+  "waitIncrementSeconds": 60,
+  "maxFailureWaitSeconds": 900,
+  "maxDeltaTimeSeconds": 43200,
+  "quickLoginCheckMilliSeconds": 1000,
+  "minimumQuickLoginWaitSeconds": 60,
+  "bruteForcePropertyPolicies": {
+    "email": {
+      "permanentLockout": false,
+      "maxTemporaryLockouts": 2,
+      "bruteForceStrategy": "LINEAR",
+      "maxFailureWaitSeconds": 120,
+      "minimumQuickLoginWaitSeconds": 9,
+      "waitIncrementSeconds": 15,
+      "quickLoginCheckMilliSeconds": 1000,
+      "maxDeltaTimeSeconds": 600,
+      "failureFactor": 1
+    }
+  }
+}

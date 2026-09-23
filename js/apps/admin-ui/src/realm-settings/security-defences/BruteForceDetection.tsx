@@ -21,6 +21,13 @@ import { useTranslation } from "react-i18next";
 import { useAdminClient } from "../../admin-client";
 import { FormAccess } from "../../components/form/FormAccess";
 import { convertToFormValues } from "../../util";
+import {
+  BruteForceMode,
+  initializePropertyPolicyOverrides,
+  modeFor,
+  propertyPolicyKey,
+  toBruteForcePropertyPolicies,
+} from "./bruteForcePropertyPolicies";
 import { Time } from "./Time";
 
 const BUILT_IN_USER_PROPERTIES = [
@@ -34,31 +41,6 @@ const BUILT_IN_USER_PROPERTIES = [
 // Categories the server tracks for brute force. Custom authenticators report their own category,
 // which is preserved in the options once configured.
 const BUILT_IN_AUTH_CHANNELS = ["password", "otp", "recovery-authn-codes"];
-
-const propertyPolicyKey = (property: string) =>
-  encodeURIComponent(property).replaceAll(".", "%2E");
-
-const optionalNumber = (value: unknown) => {
-  if (value === "" || value === null || value === undefined) {
-    return undefined;
-  }
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : undefined;
-};
-
-enum BruteForceMode {
-  Disabled = "Disabled",
-  PermanentLockout = "PermanentLockout",
-  TemporaryLockout = "TemporaryLockout",
-  PermanentAfterTemporaryLockout = "PermanentAfterTemporaryLockout",
-}
-
-const modeFor = (permanentLockout?: boolean, maxTemporaryLockouts?: number) =>
-  !permanentLockout
-    ? BruteForceMode.TemporaryLockout
-    : maxTemporaryLockouts === 0
-      ? BruteForceMode.PermanentLockout
-      : BruteForceMode.PermanentAfterTemporaryLockout;
 
 type BruteForceDetectionProps = {
   realm: RealmRepresentation;
@@ -177,6 +159,18 @@ export const BruteForceDetection = ({
   const protectedChannels: string[] =
     form.watch("bruteForceProtectedAuthChannels") ?? [];
 
+  useEffect(() => {
+    const current = form.getValues("bruteForcePropertyPolicyOverrides");
+    const next = initializePropertyPolicyOverrides(
+      current,
+      protectedProperties,
+      propertyPolicyFormValue,
+    );
+    if (next !== current) {
+      setValue("bruteForcePropertyPolicyOverrides", next);
+    }
+  }, [form, protectedProperties, propertyPolicyFormValue, setValue]);
+
   const bruteForceMode = (() => {
     if (!form.getValues("bruteForceProtected")) {
       return BruteForceMode.Disabled;
@@ -190,43 +184,9 @@ export const BruteForceDetection = ({
   })();
 
   const saveRealm = (values: RealmRepresentation & Record<string, any>) => {
-    const propertyPolicyOverrides =
-      values.bruteForcePropertyPolicyOverrides ?? {};
-    const bruteForcePropertyPolicies = Object.fromEntries(
-      protectedProperties.flatMap((property) => {
-        const policy = propertyPolicyOverrides[propertyPolicyKey(property)];
-        if (!policy?.enabled) {
-          return [];
-        }
-        const permanentLockout =
-          policy.mode !== BruteForceMode.TemporaryLockout;
-        const maxTemporaryLockouts =
-          policy.mode === BruteForceMode.PermanentLockout
-            ? 0
-            : policy.maxTemporaryLockouts;
-        return [
-          [
-            property,
-            {
-              permanentLockout,
-              maxTemporaryLockouts: optionalNumber(maxTemporaryLockouts),
-              bruteForceStrategy: policy.bruteForceStrategy,
-              maxFailureWaitSeconds: optionalNumber(
-                policy.maxFailureWaitSeconds,
-              ),
-              minimumQuickLoginWaitSeconds: optionalNumber(
-                policy.minimumQuickLoginWaitSeconds,
-              ),
-              waitIncrementSeconds: optionalNumber(policy.waitIncrementSeconds),
-              quickLoginCheckMilliSeconds: optionalNumber(
-                policy.quickLoginCheckMilliSeconds,
-              ),
-              maxDeltaTimeSeconds: optionalNumber(policy.maxDeltaTimeSeconds),
-              failureFactor: optionalNumber(policy.failureFactor),
-            },
-          ],
-        ];
-      }),
+    const bruteForcePropertyPolicies = toBruteForcePropertyPolicies(
+      protectedProperties,
+      values.bruteForcePropertyPolicyOverrides,
     );
     const realmValues = { ...values };
     delete realmValues.bruteForcePropertyPolicyOverrides;
@@ -421,7 +381,8 @@ export const BruteForceDetection = ({
                             />
                             <NumberControl
                               name={`${prefix}.failureFactor`}
-                              label={t("failureFactor")}
+                              label={t("bruteForcePropertyFailureFactor")}
+                              labelIcon={t("bruteForcePropertyFailureFactorHelp")}
                               controller={{
                                 defaultValue:
                                   form.getValues(
@@ -437,6 +398,7 @@ export const BruteForceDetection = ({
                               <NumberControl
                                 name={`${prefix}.maxTemporaryLockouts`}
                                 label={t("maxTemporaryLockouts")}
+                                labelIcon={t("maxTemporaryLockoutsHelp")}
                                 controller={{
                                   defaultValue:
                                     form.getValues("maxTemporaryLockouts") ?? 1,
@@ -449,6 +411,11 @@ export const BruteForceDetection = ({
                                 <SelectControl
                                   name={`${prefix}.bruteForceStrategy`}
                                   label={t("bruteForceStrategy")}
+                                  labelIcon={t("bruteForceStrategyHelp", {
+                                    failureFactor:
+                                      form.getValues(`${prefix}.failureFactor`) ??
+                                      form.getValues("failureFactor"),
+                                  })}
                                   controller={{
                                     defaultValue:
                                       form.getValues("bruteForceStrategy"),
@@ -489,6 +456,7 @@ export const BruteForceDetection = ({
                             <NumberControl
                               name={`${prefix}.quickLoginCheckMilliSeconds`}
                               label={t("quickLoginCheckMilliSeconds")}
+                              labelIcon={t("quickLoginCheckMilliSecondsHelp")}
                               controller={{
                                 defaultValue:
                                   form.getValues(

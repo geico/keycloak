@@ -145,42 +145,24 @@ public class DefaultBruteForceProtector implements BruteForceProtector {
             deltaTime = failureTime - last;
         }
 
-        if (!(policy.permanentLockout() && policy.maxTemporaryLockouts() == 0) && deltaTime > 0) {
-            // if last failure was more than MAX_DELTA clear failures
-            if (deltaTime > policy.maxDeltaTimeSeconds() * 1000L) {
-                userLoginFailure.clearFailures();
-            }
+        if (deltaTime > 0 && policy.shouldClearFailures(deltaTime)) {
+            userLoginFailure.clearFailures();
         }
         userLoginFailure.setLastIPFailure(remoteAddr);
         userLoginFailure.setLastFailure(failureTime);
         userLoginFailure.incrementFailures();
         logger.debugf("new num failures: %s", userLoginFailure.getNumFailures());
 
-        long waitSeconds = 0L;
-        int failureFactor = policy.failureFactor();
-        if (!(policy.permanentLockout() && policy.maxTemporaryLockouts() == 0) && failureFactor > 0) {
-            if (RealmRepresentation.BruteForceStrategy.MULTIPLE.equals(policy.strategy())) {
-                waitSeconds = policy.waitIncrementSeconds() *  ((long) userLoginFailure.getNumFailures() / failureFactor);
-            } else {
-                waitSeconds = policy.waitIncrementSeconds() * ((long) 1 + userLoginFailure.getNumFailures() - failureFactor);
-            }
-        }
-
+        long waitSeconds = policy.waitSeconds(userLoginFailure.getNumFailures());
         logger.debugv("waitSeconds: {0}", waitSeconds);
         logger.debugv("deltaTime: {0}", deltaTime);
 
-        boolean quickLoginFailure = false;
-        if (waitSeconds <= 0) {
-            if (last > 0 && deltaTime < policy.quickLoginCheckMilliSeconds()) {
-                logger.debugv("quick login, set min wait seconds");
-                waitSeconds = policy.minimumQuickLoginWaitSeconds();
-                quickLoginFailure = true;
-            }
+        boolean quickLoginFailure = policy.isQuickLogin(last, deltaTime, waitSeconds);
+        if (quickLoginFailure) {
+            logger.debugv("quick login, set min wait seconds");
         }
+        waitSeconds = policy.lockWaitSeconds(userLoginFailure.getNumFailures(), last, deltaTime);
         if (waitSeconds > 0) {
-            if(!policy.permanentLockout() || policy.maxTemporaryLockouts() > 0) {
-                waitSeconds = Math.min(policy.maxFailureWaitSeconds(), waitSeconds);
-            }
             if (!quickLoginFailure) {
                 userLoginFailure.incrementTemporaryLockouts();
             }

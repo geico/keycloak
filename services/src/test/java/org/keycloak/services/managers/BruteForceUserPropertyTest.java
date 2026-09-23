@@ -266,6 +266,53 @@ public class BruteForceUserPropertyTest {
     }
 
     @Test
+    public void linearAndMultipleStrategiesUseDifferentWaitCurves() {
+        BruteForceUserProperty.EffectivePolicy linear = new BruteForceUserProperty.EffectivePolicy(
+                false, 0, BruteForceStrategy.LINEAR, 900, 60, 15, 1000L, 600, 2);
+        BruteForceUserProperty.EffectivePolicy multiple = new BruteForceUserProperty.EffectivePolicy(
+                false, 0, BruteForceStrategy.MULTIPLE, 900, 60, 15, 1000L, 600, 2);
+
+        Assert.assertEquals(30, linear.waitSeconds(3));
+        Assert.assertEquals(15, multiple.waitSeconds(3));
+    }
+
+    @Test
+    public void waitIsCappedAndQuickLoginUsesTheMinimumWait() {
+        BruteForceUserProperty.EffectivePolicy policy = new BruteForceUserProperty.EffectivePolicy(
+                false, 0, BruteForceStrategy.LINEAR, 20, 9, 15, 1000L, 600, 5);
+
+        Assert.assertEquals(20, policy.lockWaitSeconds(6, 0, 10_000L));
+        Assert.assertTrue(policy.isQuickLogin(1_000L, 100L, 0));
+        Assert.assertEquals(9, policy.lockWaitSeconds(1, 1_000L, 100L));
+        Assert.assertFalse(policy.shouldClearFailures(600_000L));
+        Assert.assertTrue(policy.shouldClearFailures(600_001L));
+    }
+
+    @Test
+    public void permanentOnlyPoliciesDoNotWaitOrReset() {
+        BruteForceUserProperty.EffectivePolicy policy = new BruteForceUserProperty.EffectivePolicy(
+                true, 0, BruteForceStrategy.MULTIPLE, 900, 60, 15, 1000L, 600, 2);
+
+        Assert.assertTrue(policy.isPermanentOnly());
+        Assert.assertEquals(0, policy.waitSeconds(10));
+        Assert.assertFalse(policy.shouldClearFailures(1_000_000L));
+    }
+
+    @Test
+    public void channelCountersDoNotUseNamedPropertyOverrides() {
+        BruteForcePolicyRepresentation emailPolicy = new BruteForcePolicyRepresentation();
+        emailPolicy.setFailureFactor(1);
+        RealmModel realm = realm(BruteForceLockPolicy.PROPERTIES, 30, 10,
+                Map.of("email", emailPolicy), "email");
+        UserModel user = user("user-id", "UserName", "User@Example.com", Map.of());
+        String channelKey = BruteForceAuthChannel.channelKey("password",
+                BruteForceUserProperty.propertyKey("email", "user@example.com"));
+
+        Assert.assertEquals(5, BruteForceUserProperty.getEffectivePolicy(realm, user, channelKey).failureFactor());
+        Assert.assertEquals(30, BruteForceUserProperty.getEffectivePolicy(realm, user, "user-id").failureFactor());
+    }
+
+    @Test
     public void normalizesUsernameAndEmailCaseAndWhitespace() {
         RealmModel realm = realm("username", "email");
         UserModel user = user("user-id", "  UserName  ", "  User@Example.com  ", Map.of());
@@ -400,6 +447,9 @@ public class BruteForceUserPropertyTest {
                     }
                     if ("getMaxDeltaTimeSeconds".equals(method.getName())) {
                         return 43200;
+                    }
+                    if ("getBruteForceChannelFailureFactor".equals(method.getName())) {
+                        return 5;
                     }
                     if ("getAttribute".equals(method.getName())) {
                         return propertyFailureFactor == null ? null : Integer.toString(propertyFailureFactor);

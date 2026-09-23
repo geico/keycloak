@@ -71,10 +71,12 @@ test.describe.serial("Security defenses", () => {
     expect(realm?.bruteForcePropertyPolicies?.email).toMatchObject({
       permanentLockout: false,
       failureFactor: 3,
-      waitIncrementSeconds: 5,
-      maxFailureWaitSeconds: 10,
-      maxDeltaTimeSeconds: 1,
-      minimumQuickLoginWaitSeconds: 1,
+      bruteForceStrategy: "LINEAR",
+      waitIncrementSeconds: 300,
+      maxFailureWaitSeconds: 600,
+      maxDeltaTimeSeconds: 2160000,
+      quickLoginCheckMilliSeconds: 1000,
+      minimumQuickLoginWaitSeconds: 540,
     });
   });
 
