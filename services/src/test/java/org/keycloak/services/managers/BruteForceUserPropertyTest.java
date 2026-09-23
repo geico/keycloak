@@ -26,7 +26,9 @@ import org.keycloak.models.RealmModel;
 import org.keycloak.models.UserLoginFailureModel;
 import org.keycloak.models.UserLoginFailureProvider;
 import org.keycloak.models.UserModel;
+import org.keycloak.representations.idm.BruteForcePolicyRepresentation;
 import org.keycloak.representations.idm.RealmRepresentation.BruteForceLockPolicy;
+import org.keycloak.representations.idm.RealmRepresentation.BruteForceStrategy;
 
 import org.junit.Assert;
 import org.junit.Test;
@@ -231,6 +233,39 @@ public class BruteForceUserPropertyTest {
     }
 
     @Test
+    public void namedPropertyPolicyOverridesTheCompleteRealmPolicy() {
+        BruteForcePolicyRepresentation emailPolicy = new BruteForcePolicyRepresentation();
+        emailPolicy.setPermanentLockout(false);
+        emailPolicy.setMaxTemporaryLockouts(4);
+        emailPolicy.setBruteForceStrategy(BruteForceStrategy.LINEAR);
+        emailPolicy.setMaxFailureWaitSeconds(120);
+        emailPolicy.setMinimumQuickLoginWaitSeconds(7);
+        emailPolicy.setWaitIncrementSeconds(15);
+        emailPolicy.setQuickLoginCheckMilliSeconds(250L);
+        emailPolicy.setMaxDeltaTimeSeconds(600);
+        emailPolicy.setFailureFactor(3);
+        RealmModel realm = realm(BruteForceLockPolicy.PROPERTIES, 30, 10,
+                Map.of("email", emailPolicy), "email", "phoneNumber");
+        UserModel user = user("user-id", "UserName", "User@Example.com",
+                Map.of("phoneNumber", List.of("+1-555-0100")));
+
+        BruteForceUserProperty.EffectivePolicy actual = BruteForceUserProperty.getEffectivePolicy(realm, user,
+                BruteForceUserProperty.propertyKey("email", "user@example.com"));
+
+        Assert.assertFalse(actual.permanentLockout());
+        Assert.assertEquals(4, actual.maxTemporaryLockouts());
+        Assert.assertEquals(BruteForceStrategy.LINEAR, actual.strategy());
+        Assert.assertEquals(120, actual.maxFailureWaitSeconds());
+        Assert.assertEquals(7, actual.minimumQuickLoginWaitSeconds());
+        Assert.assertEquals(15, actual.waitIncrementSeconds());
+        Assert.assertEquals(250L, actual.quickLoginCheckMilliSeconds());
+        Assert.assertEquals(600, actual.maxDeltaTimeSeconds());
+        Assert.assertEquals(3, actual.failureFactor());
+        Assert.assertEquals(10, BruteForceUserProperty.getEffectivePolicy(realm, user,
+                BruteForceUserProperty.propertyKey("phoneNumber", "+1-555-0100")).failureFactor());
+    }
+
+    @Test
     public void normalizesUsernameAndEmailCaseAndWhitespace() {
         RealmModel realm = realm("username", "email");
         UserModel user = user("user-id", "  UserName  ", "  User@Example.com  ", Map.of());
@@ -318,6 +353,11 @@ public class BruteForceUserPropertyTest {
 
     private static RealmModel realm(BruteForceLockPolicy policy, int failureFactor, Integer propertyFailureFactor,
             String... properties) {
+        return realm(policy, failureFactor, propertyFailureFactor, Map.of(), properties);
+    }
+
+    private static RealmModel realm(BruteForceLockPolicy policy, int failureFactor, Integer propertyFailureFactor,
+            Map<String, BruteForcePolicyRepresentation> propertyPolicies, String... properties) {
         return (RealmModel) Proxy.newProxyInstance(
                 BruteForceUserPropertyTest.class.getClassLoader(),
                 new Class<?>[] { RealmModel.class },
@@ -334,11 +374,32 @@ public class BruteForceUserPropertyTest {
                     if ("getBruteForcePropertyFailureFactor".equals(method.getName())) {
                         return propertyFailureFactor != null ? propertyFailureFactor : failureFactor;
                     }
+                    if ("getBruteForcePropertyPolicies".equals(method.getName())) {
+                        return propertyPolicies;
+                    }
                     if ("isPermanentLockout".equals(method.getName())) {
                         return true;
                     }
                     if ("getMaxTemporaryLockouts".equals(method.getName())) {
                         return 0;
+                    }
+                    if ("getBruteForceStrategy".equals(method.getName())) {
+                        return BruteForceStrategy.MULTIPLE;
+                    }
+                    if ("getMaxFailureWaitSeconds".equals(method.getName())) {
+                        return 900;
+                    }
+                    if ("getMinimumQuickLoginWaitSeconds".equals(method.getName())) {
+                        return 60;
+                    }
+                    if ("getWaitIncrementSeconds".equals(method.getName())) {
+                        return 60;
+                    }
+                    if ("getQuickLoginCheckMilliSeconds".equals(method.getName())) {
+                        return 1000L;
+                    }
+                    if ("getMaxDeltaTimeSeconds".equals(method.getName())) {
+                        return 43200;
                     }
                     if ("getAttribute".equals(method.getName())) {
                         return propertyFailureFactor == null ? null : Integer.toString(propertyFailureFactor);

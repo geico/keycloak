@@ -96,6 +96,7 @@ import org.keycloak.representations.idm.ApplicationRepresentation;
 import org.keycloak.representations.idm.AuthenticationExecutionExportRepresentation;
 import org.keycloak.representations.idm.AuthenticationFlowRepresentation;
 import org.keycloak.representations.idm.AuthenticatorConfigRepresentation;
+import org.keycloak.representations.idm.BruteForcePolicyRepresentation;
 import org.keycloak.representations.idm.ClaimRepresentation;
 import org.keycloak.representations.idm.ClientRepresentation;
 import org.keycloak.representations.idm.ClientScopeRepresentation;
@@ -233,6 +234,7 @@ public class DefaultExportImportManager implements ExportImportManager {
         if (rep.getBruteForcePropertyFailureFactor() != null) newRealm.setBruteForcePropertyFailureFactor(checkNonNegativeNumber(rep.getBruteForcePropertyFailureFactor(),"Property failure factor"));
         if (rep.getMaxSecondaryAuthFailures() != null) newRealm.setMaxSecondaryAuthFailures(checkNonNegativeNumber(rep.getMaxSecondaryAuthFailures(),"Maximum secondary authentication failures"));
         if (rep.getBruteForceProtectedUserProperties() != null) newRealm.setBruteForceProtectedUserProperties(rep.getBruteForceProtectedUserProperties());
+        if (rep.getBruteForcePropertyPolicies() != null) newRealm.setBruteForcePropertyPolicies(validatePropertyPolicies(rep.getBruteForcePropertyPolicies(), newRealm.getBruteForceProtectedUserProperties()));
         if (rep.getBruteForceLockPolicy() != null) newRealm.setBruteForceLockPolicy(rep.getBruteForceLockPolicy());
         if (rep.getBruteForceChannelFailureFactor() != null) newRealm.setBruteForceChannelFailureFactor(checkNonNegativeNumber(rep.getBruteForceChannelFailureFactor(),"Channel failure factor"));
         if (rep.getBruteForceProtectedAuthChannels() != null) newRealm.setBruteForceProtectedAuthChannels(rep.getBruteForceProtectedAuthChannels());
@@ -845,6 +847,7 @@ public class DefaultExportImportManager implements ExportImportManager {
         if (rep.getBruteForcePropertyFailureFactor() != null) realm.setBruteForcePropertyFailureFactor(checkNonNegativeNumber(rep.getBruteForcePropertyFailureFactor(),"Property failure factor"));
         if (rep.getMaxSecondaryAuthFailures() != null) realm.setMaxSecondaryAuthFailures(checkNonNegativeNumber(rep.getMaxSecondaryAuthFailures(), "Maximum secondary authentication failures"));
         if (rep.getBruteForceProtectedUserProperties() != null) realm.setBruteForceProtectedUserProperties(rep.getBruteForceProtectedUserProperties());
+        if (rep.getBruteForcePropertyPolicies() != null) realm.setBruteForcePropertyPolicies(validatePropertyPolicies(rep.getBruteForcePropertyPolicies(), realm.getBruteForceProtectedUserProperties()));
         if (rep.getBruteForceLockPolicy() != null) realm.setBruteForceLockPolicy(rep.getBruteForceLockPolicy());
         if (rep.getBruteForceChannelFailureFactor() != null) realm.setBruteForceChannelFailureFactor(checkNonNegativeNumber(rep.getBruteForceChannelFailureFactor(),"Channel failure factor"));
         if (rep.getBruteForceProtectedAuthChannels() != null) realm.setBruteForceProtectedAuthChannels(rep.getBruteForceProtectedAuthChannels());
@@ -1107,6 +1110,35 @@ public class DefaultExportImportManager implements ExportImportManager {
             throw new ModelException(name + " may not be a negative value");
         }
         return value;
+    }
+
+    private static Map<String, BruteForcePolicyRepresentation> validatePropertyPolicies(
+            Map<String, BruteForcePolicyRepresentation> policies, List<String> protectedProperties) {
+        for (Map.Entry<String, BruteForcePolicyRepresentation> entry : policies.entrySet()) {
+            String property = entry.getKey();
+            BruteForcePolicyRepresentation policy = entry.getValue();
+            if (property == null || property.isBlank() || "id".equals(property.trim())
+                    || !protectedProperties.contains(property.trim())) {
+                throw new ModelException("Brute-force policy property must be protected: " + property);
+            }
+            if (policy == null) {
+                throw new ModelException("Brute-force property policy may not be null: " + property);
+            }
+            checkNonNegative(policy.getFailureFactor(), "Property failure factor");
+            checkNonNegative(policy.getMaxTemporaryLockouts(), "Property maximum temporary lockouts");
+            checkNonNegative(policy.getMaxFailureWaitSeconds(), "Property maximum failure wait seconds");
+            checkNonNegative(policy.getMinimumQuickLoginWaitSeconds(), "Property minimum quick login wait seconds");
+            checkNonNegative(policy.getWaitIncrementSeconds(), "Property wait increment seconds");
+            checkNonNegative(policy.getQuickLoginCheckMilliSeconds(), "Property quick login check milliseconds");
+            checkNonNegative(policy.getMaxDeltaTimeSeconds(), "Property maximum delta time seconds");
+        }
+        return policies;
+    }
+
+    private static void checkNonNegative(Number value, String name) {
+        if (value != null && value.longValue() < 0) {
+            throw new ModelException(name + " may not be a negative value");
+        }
     }
 
     private static void convertDeprecatedApplications(KeycloakSession session, RealmRepresentation realm) {

@@ -26,8 +26,10 @@ import jakarta.ws.rs.BadRequestException;
 
 import org.keycloak.admin.client.resource.AttackDetectionResource;
 import org.keycloak.models.UserModel;
+import org.keycloak.representations.idm.BruteForcePolicyRepresentation;
 import org.keycloak.representations.idm.RealmRepresentation;
 import org.keycloak.representations.idm.RealmRepresentation.BruteForceChannelLockScope;
+import org.keycloak.representations.idm.RealmRepresentation.BruteForceLockPolicy;
 import org.keycloak.representations.idm.UserRepresentation;
 import org.keycloak.testframework.annotations.InjectRealm;
 import org.keycloak.testframework.annotations.InjectUser;
@@ -142,6 +144,22 @@ public class AttackDetectionAuthChannelTest {
         failPasswordLogin(2);
 
         assertEquals(0, properties(detection.bruteForceUserStatus(user.getId())).get("id").get("numFailures"));
+    }
+
+    @Test
+    public void channelAndPropertyCountersAdvanceIndependently() {
+        withUsernamePropertyPolicy(() -> {
+            AttackDetectionResource detection = managedRealm.admin().attackDetection();
+
+            failPasswordLogin(1);
+
+            Map<String, Object> status = detection.bruteForceUserStatus(user.getId());
+            assertEquals(1, properties(status).get(UserModel.USERNAME).get("numFailures"));
+            assertEquals(true, properties(status).get(UserModel.USERNAME).get("disabled"));
+            assertEquals(1, channels(status).get(PASSWORD_CHANNEL).get("numFailures"));
+            assertEquals(false, channels(status).get(PASSWORD_CHANNEL).get("disabled"));
+            assertFalse((Boolean) status.get("disabled"));
+        });
     }
 
     @Test
@@ -302,6 +320,32 @@ public class AttackDetectionAuthChannelTest {
         } finally {
             RealmRepresentation restore = managedRealm.admin().toRepresentation();
             restore.setBruteForceChannelLockScope(previous);
+            managedRealm.admin().update(restore);
+        }
+    }
+
+    private void withUsernamePropertyPolicy(Runnable test) {
+        RealmRepresentation realm = managedRealm.admin().toRepresentation();
+        BruteForceLockPolicy previousLockPolicy = realm.getBruteForceLockPolicy();
+        List<String> previousProperties = realm.getBruteForceProtectedUserProperties();
+        Map<String, BruteForcePolicyRepresentation> previousPolicies = realm.getBruteForcePropertyPolicies();
+
+        BruteForcePolicyRepresentation policy = new BruteForcePolicyRepresentation();
+        policy.setFailureFactor(1);
+        policy.setPermanentLockout(false);
+        policy.setWaitIncrementSeconds(60);
+        policy.setMaxFailureWaitSeconds(60);
+        realm.setBruteForceLockPolicy(BruteForceLockPolicy.PROPERTIES);
+        realm.setBruteForceProtectedUserProperties(List.of(UserModel.USERNAME));
+        realm.setBruteForcePropertyPolicies(Map.of(UserModel.USERNAME, policy));
+        managedRealm.admin().update(realm);
+        try {
+            test.run();
+        } finally {
+            RealmRepresentation restore = managedRealm.admin().toRepresentation();
+            restore.setBruteForceLockPolicy(previousLockPolicy);
+            restore.setBruteForceProtectedUserProperties(previousProperties);
+            restore.setBruteForcePropertyPolicies(previousPolicies == null ? Map.of() : previousPolicies);
             managedRealm.admin().update(restore);
         }
     }

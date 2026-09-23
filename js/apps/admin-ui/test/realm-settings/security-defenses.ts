@@ -49,6 +49,43 @@ export async function selectAuthChannelLockScope(page: Page, scope: string) {
   await selectItem(page, "#bruteForceChannelLockScope", scope);
 }
 
+export async function selectBruteForceLockPolicy(page: Page, policy: string) {
+  await selectItem(page, "#bruteForceLockPolicy", policy);
+}
+
+export async function selectProtectedUserProperties(
+  page: Page,
+  properties: string[],
+) {
+  await page.locator("#bruteForceProtectedUserProperties").click();
+  for (const property of properties) {
+    await page.getByRole("option", { name: property, exact: true }).click();
+  }
+  await page.keyboard.press("Escape");
+}
+
+export async function configureEmailPropertyPolicy(page: Page) {
+  await page.getByTestId("property-policy-email").click();
+  await selectItem(
+    page,
+    '[id="bruteForcePropertyPolicyOverrides.email.mode"]',
+    "Lockout temporarily",
+  );
+  await page
+    .locator(
+      '[id="bruteForcePropertyPolicyOverrides.email.failureFactor"] input',
+    )
+    .fill("3");
+  await page
+    .getByTestId("bruteForcePropertyPolicyOverrides.email.waitIncrementSeconds")
+    .fill("5");
+  await page
+    .getByTestId(
+      "bruteForcePropertyPolicyOverrides.email.maxFailureWaitSeconds",
+    )
+    .fill("10");
+}
+
 export async function fillMaxChannelFailures(page: Page, value: string) {
   await page.locator("#bruteForceChannelFailureFactor input").fill(value);
 }

@@ -35,6 +35,8 @@ import org.keycloak.models.ModelDuplicateException;
 import org.keycloak.models.RealmModel;
 import org.keycloak.models.UserLoginFailureModel;
 import org.keycloak.models.UserModel;
+import org.keycloak.representations.idm.BruteForcePolicyRepresentation;
+import org.keycloak.representations.idm.RealmRepresentation;
 
 /**
  * Resolves brute-force failure-counter keys for a user.
@@ -118,6 +120,71 @@ public final class BruteForceUserProperty {
     }
 
     /**
+     * Effective lock policy for one counter. Account and channel counters keep their existing realm
+     * policy; only direct property counters use named property overrides.
+     */
+    public static EffectivePolicy getEffectivePolicy(RealmModel realm, UserModel user, String failureKey) {
+        String property = propertyForFailureKey(realm, user, failureKey);
+        BruteForcePolicyRepresentation override = property == null
+                ? null
+                : realm.getBruteForcePropertyPolicies().get(property);
+        int failureFactor = property != null
+                ? value(override == null ? null : override.getFailureFactor(), realm.getBruteForcePropertyFailureFactor())
+                : getFailureFactor(realm, failureKey);
+        return new EffectivePolicy(
+                value(override == null ? null : override.isPermanentLockout(), realm.isPermanentLockout()),
+                value(override == null ? null : override.getMaxTemporaryLockouts(), realm.getMaxTemporaryLockouts()),
+                value(override == null ? null : override.getBruteForceStrategy(), realm.getBruteForceStrategy()),
+                value(override == null ? null : override.getMaxFailureWaitSeconds(), realm.getMaxFailureWaitSeconds()),
+                value(override == null ? null : override.getMinimumQuickLoginWaitSeconds(), realm.getMinimumQuickLoginWaitSeconds()),
+                value(override == null ? null : override.getWaitIncrementSeconds(), realm.getWaitIncrementSeconds()),
+                value(override == null ? null : override.getQuickLoginCheckMilliSeconds(), realm.getQuickLoginCheckMilliSeconds()),
+                value(override == null ? null : override.getMaxDeltaTimeSeconds(), realm.getMaxDeltaTimeSeconds()),
+                failureFactor);
+    }
+
+    private static String propertyForFailureKey(RealmModel realm, UserModel user, String failureKey) {
+        if (user == null || !isPropertyKey(failureKey) || BruteForceAuthChannel.isChannelKey(failureKey)) {
+            return null;
+        }
+        return getProtectedProperties(realm).stream()
+                .filter(property -> !ID.equals(property))
+                .filter(property -> getFailureKeys(realm, user, property).contains(failureKey))
+                .findFirst()
+                .orElse(null);
+    }
+
+    private static int value(Integer override, int fallback) {
+        return override == null ? fallback : override;
+    }
+
+    private static long value(Long override, long fallback) {
+        return override == null ? fallback : override;
+    }
+
+    private static boolean value(Boolean override, boolean fallback) {
+        return override == null ? fallback : override;
+    }
+
+    private static RealmRepresentation.BruteForceStrategy value(
+            RealmRepresentation.BruteForceStrategy override,
+            RealmRepresentation.BruteForceStrategy fallback) {
+        return override == null ? fallback : override;
+    }
+
+    public record EffectivePolicy(
+            boolean permanentLockout,
+            int maxTemporaryLockouts,
+            RealmRepresentation.BruteForceStrategy strategy,
+            int maxFailureWaitSeconds,
+            int minimumQuickLoginWaitSeconds,
+            int waitIncrementSeconds,
+            long quickLoginCheckMilliSeconds,
+            int maxDeltaTimeSeconds,
+            int failureFactor) {
+    }
+
+    /**
      * Counters that disable every identifier of this user. Property keys are omitted so a
      * locked email or phone number cannot disable login with a different identifier.
      */
@@ -161,6 +228,15 @@ public final class BruteForceUserProperty {
                 && (model.getNumTemporaryLockouts() > realm.getMaxTemporaryLockouts()
                 || (realm.getMaxTemporaryLockouts() == 0
                 && model.getNumFailures() >= getFailureFactor(realm, failureKey)));
+    }
+
+    public static boolean isPermanentlyLocked(RealmModel realm, UserModel user, UserLoginFailureModel model,
+            String failureKey) {
+        EffectivePolicy policy = getEffectivePolicy(realm, user, failureKey);
+        return policy.permanentLockout()
+                && (model.getNumTemporaryLockouts() > policy.maxTemporaryLockouts()
+                || (policy.maxTemporaryLockouts() == 0
+                && model.getNumFailures() >= policy.failureFactor()));
     }
 
     public static List<String> getProtectedProperties(RealmModel realm) {
@@ -248,7 +324,7 @@ public final class BruteForceUserProperty {
                 .filter(failureKey -> !clearedKeys.contains(failureKey))
                 .anyMatch(failureKey -> {
                     UserLoginFailureModel model = session.loginFailures().getUserLoginFailure(realm, failureKey);
-                    return model != null && isPermanentlyLocked(realm, model, failureKey);
+                    return model != null && isPermanentlyLocked(realm, user, model, failureKey);
                 });
     }
 

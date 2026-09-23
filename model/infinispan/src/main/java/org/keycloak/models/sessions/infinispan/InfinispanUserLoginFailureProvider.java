@@ -37,6 +37,7 @@ import org.keycloak.models.sessions.infinispan.stream.Mappers;
 import org.keycloak.models.sessions.infinispan.stream.RemoveKeyConsumer;
 import org.keycloak.models.sessions.infinispan.stream.SessionWrapperPredicate;
 import org.keycloak.models.sessions.infinispan.util.FuturesHelper;
+import org.keycloak.models.utils.LoginFailureUtils;
 
 import org.infinispan.Cache;
 import org.jboss.logging.Logger;
@@ -157,9 +158,9 @@ public class InfinispanUserLoginFailureProvider implements UserLoginFailureProvi
                 .filter(SessionWrapperPredicate.create(realm.getId()));
         if (realm.isBruteForceProtected()) {
             var action = new LoginFailuresLifespanUpdate(
-                    realm.getMaxDeltaTimeSeconds() * 1000L,
-                    realm.getMaxTemporaryLockouts(),
-                    realm.isPermanentLockout()
+                    LoginFailureUtils.getMaxDeltaTimeSeconds(realm) * 1000L,
+                    0,
+                    LoginFailureUtils.hasNonExpiringFailures(realm)
             );
             stream.forEach(action);
         } else {

@@ -13,9 +13,10 @@ import {
   Button,
   FormGroup,
   SelectOption,
+  Switch,
 } from "@patternfly/react-core";
-import { useEffect, useMemo, useState } from "react";
-import { FormProvider, useForm } from "react-hook-form";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Controller, FormProvider, useForm } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 import { useAdminClient } from "../../admin-client";
 import { FormAccess } from "../../components/form/FormAccess";
@@ -33,6 +34,31 @@ const BUILT_IN_USER_PROPERTIES = [
 // Categories the server tracks for brute force. Custom authenticators report their own category,
 // which is preserved in the options once configured.
 const BUILT_IN_AUTH_CHANNELS = ["password", "otp", "recovery-authn-codes"];
+
+const propertyPolicyKey = (property: string) =>
+  encodeURIComponent(property).replaceAll(".", "%2E");
+
+const optionalNumber = (value: unknown) => {
+  if (value === "" || value === null || value === undefined) {
+    return undefined;
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+};
+
+enum BruteForceMode {
+  Disabled = "Disabled",
+  PermanentLockout = "PermanentLockout",
+  TemporaryLockout = "TemporaryLockout",
+  PermanentAfterTemporaryLockout = "PermanentAfterTemporaryLockout",
+}
+
+const modeFor = (permanentLockout?: boolean, maxTemporaryLockouts?: number) =>
+  !permanentLockout
+    ? BruteForceMode.TemporaryLockout
+    : maxTemporaryLockouts === 0
+      ? BruteForceMode.PermanentLockout
+      : BruteForceMode.PermanentAfterTemporaryLockout;
 
 type BruteForceDetectionProps = {
   realm: RealmRepresentation;
@@ -79,13 +105,6 @@ export const BruteForceDetection = ({
     return [...names];
   }, [realm.bruteForceProtectedAuthChannels]);
 
-  enum BruteForceMode {
-    Disabled = "Disabled",
-    PermanentLockout = "PermanentLockout",
-    TemporaryLockout = "TemporaryLockout",
-    PermanentAfterTemporaryLockout = "PermanentAfterTemporaryLockout",
-  }
-
   const bruteForceModes = [
     BruteForceMode.Disabled,
     BruteForceMode.PermanentLockout,
@@ -97,6 +116,41 @@ export const BruteForceDetection = ({
   const bruteForceLockPolicies = ["USER", "PROPERTIES", "ANY"] as const;
   const bruteForceChannelLockScopes = ["ACCOUNT", "CHANNEL"] as const;
 
+  const propertyPolicyFormValue = useCallback(
+    (property: string) => {
+      const policy = realm.bruteForcePropertyPolicies?.[property];
+      return {
+        enabled: policy !== undefined,
+        mode: modeFor(
+          policy?.permanentLockout ?? realm.permanentLockout,
+          policy?.maxTemporaryLockouts ?? realm.maxTemporaryLockouts,
+        ),
+        failureFactor:
+          policy?.failureFactor ??
+          realm.bruteForcePropertyFailureFactor ??
+          realm.failureFactor ??
+          0,
+        bruteForceStrategy:
+          policy?.bruteForceStrategy ?? realm.bruteForceStrategy,
+        maxFailureWaitSeconds:
+          policy?.maxFailureWaitSeconds ?? realm.maxFailureWaitSeconds,
+        minimumQuickLoginWaitSeconds:
+          policy?.minimumQuickLoginWaitSeconds ??
+          realm.minimumQuickLoginWaitSeconds,
+        waitIncrementSeconds:
+          policy?.waitIncrementSeconds ?? realm.waitIncrementSeconds,
+        quickLoginCheckMilliSeconds:
+          policy?.quickLoginCheckMilliSeconds ??
+          realm.quickLoginCheckMilliSeconds,
+        maxDeltaTimeSeconds:
+          policy?.maxDeltaTimeSeconds ?? realm.maxDeltaTimeSeconds,
+        maxTemporaryLockouts:
+          policy?.maxTemporaryLockouts ?? realm.maxTemporaryLockouts,
+      };
+    },
+    [realm],
+  );
+
   const setupForm = () => {
     convertToFormValues(realm, setValue);
     setValue("bruteForceLockPolicy", realm.bruteForceLockPolicy ?? "USER");
@@ -104,11 +158,22 @@ export const BruteForceDetection = ({
       "bruteForceChannelLockScope",
       realm.bruteForceChannelLockScope ?? "ACCOUNT",
     );
+    setValue(
+      "bruteForcePropertyPolicyOverrides",
+      Object.fromEntries(
+        (realm.bruteForceProtectedUserProperties ?? []).map((property) => [
+          propertyPolicyKey(property),
+          propertyPolicyFormValue(property),
+        ]),
+      ),
+    );
     setIsBruteForceModeUpdated(false);
   };
-  useEffect(setupForm, [realm, setValue]);
+  useEffect(setupForm, [realm, setValue, propertyPolicyFormValue]);
 
   const lockPolicy = form.watch("bruteForceLockPolicy") ?? "USER";
+  const protectedProperties: string[] =
+    form.watch("bruteForceProtectedUserProperties") ?? [];
   const protectedChannels: string[] =
     form.watch("bruteForceProtectedAuthChannels") ?? [];
 
@@ -124,12 +189,56 @@ export const BruteForceDetection = ({
       : BruteForceMode.PermanentAfterTemporaryLockout;
   })();
 
+  const saveRealm = (values: RealmRepresentation & Record<string, any>) => {
+    const propertyPolicyOverrides =
+      values.bruteForcePropertyPolicyOverrides ?? {};
+    const bruteForcePropertyPolicies = Object.fromEntries(
+      protectedProperties.flatMap((property) => {
+        const policy = propertyPolicyOverrides[propertyPolicyKey(property)];
+        if (!policy?.enabled) {
+          return [];
+        }
+        const permanentLockout =
+          policy.mode !== BruteForceMode.TemporaryLockout;
+        const maxTemporaryLockouts =
+          policy.mode === BruteForceMode.PermanentLockout
+            ? 0
+            : policy.maxTemporaryLockouts;
+        return [
+          [
+            property,
+            {
+              permanentLockout,
+              maxTemporaryLockouts: optionalNumber(maxTemporaryLockouts),
+              bruteForceStrategy: policy.bruteForceStrategy,
+              maxFailureWaitSeconds: optionalNumber(
+                policy.maxFailureWaitSeconds,
+              ),
+              minimumQuickLoginWaitSeconds: optionalNumber(
+                policy.minimumQuickLoginWaitSeconds,
+              ),
+              waitIncrementSeconds: optionalNumber(policy.waitIncrementSeconds),
+              quickLoginCheckMilliSeconds: optionalNumber(
+                policy.quickLoginCheckMilliSeconds,
+              ),
+              maxDeltaTimeSeconds: optionalNumber(policy.maxDeltaTimeSeconds),
+              failureFactor: optionalNumber(policy.failureFactor),
+            },
+          ],
+        ];
+      }),
+    );
+    const realmValues = { ...values };
+    delete realmValues.bruteForcePropertyPolicyOverrides;
+    save({ ...realmValues, bruteForcePropertyPolicies });
+  };
+
   return (
     <FormProvider {...form}>
       <FormAccess
         role="manage-realm"
         isHorizontal
-        onSubmit={handleSubmit(save)}
+        onSubmit={handleSubmit(saveRealm)}
       >
         <FormGroup
           label={t("bruteForceMode")}
@@ -247,6 +356,161 @@ export const BruteForceDetection = ({
                 }}
                 options={lockPropertyOptions}
               />
+            )}
+            {lockPolicy !== "USER" && protectedProperties.length > 0 && (
+              <FormGroup
+                label={t("bruteForcePropertyPolicies")}
+                fieldId="bruteForcePropertyPolicies"
+                labelIcon={
+                  <HelpItem
+                    helpText={t("bruteForcePropertyPoliciesHelp")}
+                    fieldLabelId="bruteForcePropertyPolicies"
+                  />
+                }
+              >
+                {protectedProperties
+                  .filter((property) => property !== "id")
+                  .map((property) => {
+                    const prefix = `bruteForcePropertyPolicyOverrides.${propertyPolicyKey(property)}`;
+                    const enabled = form.watch(`${prefix}.enabled`) ?? false;
+                    const mode =
+                      form.watch(`${prefix}.mode`) ??
+                      modeFor(
+                        form.getValues("permanentLockout"),
+                        form.getValues("maxTemporaryLockouts"),
+                      );
+                    return (
+                      <div key={property} className="pf-v5-u-mb-lg">
+                        <Controller
+                          name={`${prefix}.enabled`}
+                          control={form.control}
+                          defaultValue={false}
+                          render={({ field }) => (
+                            <Switch
+                              id={`property-policy-${propertyPolicyKey(property)}`}
+                              data-testid={`property-policy-${property}`}
+                              label={property}
+                              labelOff={property}
+                              isChecked={field.value}
+                              onChange={(_event, checked) =>
+                                field.onChange(checked)
+                              }
+                            />
+                          )}
+                        />
+                        {enabled && (
+                          <>
+                            <SelectControl
+                              name={`${prefix}.mode`}
+                              label={t("bruteForceMode")}
+                              controller={{
+                                defaultValue: modeFor(
+                                  form.getValues("permanentLockout"),
+                                  form.getValues("maxTemporaryLockouts"),
+                                ),
+                              }}
+                              options={bruteForceModes
+                                .filter(
+                                  (candidate) =>
+                                    candidate !== BruteForceMode.Disabled,
+                                )
+                                .map((candidate) => ({
+                                  key: candidate,
+                                  value: t(`bruteForceMode.${candidate}`),
+                                }))}
+                            />
+                            <NumberControl
+                              name={`${prefix}.failureFactor`}
+                              label={t("failureFactor")}
+                              controller={{
+                                defaultValue:
+                                  form.getValues(
+                                    "bruteForcePropertyFailureFactor",
+                                  ) ??
+                                  form.getValues("failureFactor") ??
+                                  0,
+                                rules: { required: t("required"), min: 0 },
+                              }}
+                            />
+                            {mode ===
+                              BruteForceMode.PermanentAfterTemporaryLockout && (
+                              <NumberControl
+                                name={`${prefix}.maxTemporaryLockouts`}
+                                label={t("maxTemporaryLockouts")}
+                                controller={{
+                                  defaultValue:
+                                    form.getValues("maxTemporaryLockouts") ?? 1,
+                                  rules: { required: t("required"), min: 0 },
+                                }}
+                              />
+                            )}
+                            {mode !== BruteForceMode.PermanentLockout && (
+                              <>
+                                <SelectControl
+                                  name={`${prefix}.bruteForceStrategy`}
+                                  label={t("bruteForceStrategy")}
+                                  controller={{
+                                    defaultValue:
+                                      form.getValues("bruteForceStrategy"),
+                                  }}
+                                  options={bruteForceStrategyTypes.map(
+                                    (key) => ({
+                                      key,
+                                      value: t(`bruteForceStrategy.${key}`),
+                                    }),
+                                  )}
+                                />
+                                <Time
+                                  name={`${prefix}.waitIncrementSeconds`}
+                                  labelName="waitIncrementSeconds"
+                                  defaultValue={form.getValues(
+                                    "waitIncrementSeconds",
+                                  )}
+                                  min={0}
+                                />
+                                <Time
+                                  name={`${prefix}.maxFailureWaitSeconds`}
+                                  labelName="maxFailureWaitSeconds"
+                                  defaultValue={form.getValues(
+                                    "maxFailureWaitSeconds",
+                                  )}
+                                  min={0}
+                                />
+                                <Time
+                                  name={`${prefix}.maxDeltaTimeSeconds`}
+                                  labelName="maxDeltaTimeSeconds"
+                                  defaultValue={form.getValues(
+                                    "maxDeltaTimeSeconds",
+                                  )}
+                                  min={0}
+                                />
+                              </>
+                            )}
+                            <NumberControl
+                              name={`${prefix}.quickLoginCheckMilliSeconds`}
+                              label={t("quickLoginCheckMilliSeconds")}
+                              controller={{
+                                defaultValue:
+                                  form.getValues(
+                                    "quickLoginCheckMilliSeconds",
+                                  ) ?? 0,
+                                rules: { required: t("required"), min: 0 },
+                              }}
+                            />
+                            <Time
+                              name={`${prefix}.minimumQuickLoginWaitSeconds`}
+                              labelName="minimumQuickLoginWaitSeconds"
+                              defaultValue={form.getValues(
+                                "minimumQuickLoginWaitSeconds",
+                              )}
+                              min={0}
+                            />
+                          </>
+                        )}
+                      </div>
+                    );
+                  })}
+              </FormGroup>
             )}
             <SelectControl
               name="bruteForceProtectedAuthChannels"

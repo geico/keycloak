@@ -170,6 +170,7 @@ public class ModelToRepresentation {
         REALM_EXCLUDED_ATTRIBUTES.add("maxDeltaTimeSeconds");
         REALM_EXCLUDED_ATTRIBUTES.add("failureFactor");
         REALM_EXCLUDED_ATTRIBUTES.add("bruteForcePropertyFailureFactor");
+        REALM_EXCLUDED_ATTRIBUTES.add("bruteForcePropertyPolicies");
         REALM_EXCLUDED_ATTRIBUTES.add("maxSecondaryAuthFailures");
         REALM_EXCLUDED_ATTRIBUTES.add("bruteForceProtectedUserProperties");
         REALM_EXCLUDED_ATTRIBUTES.add("bruteForceLockPolicy");
@@ -518,6 +519,9 @@ public class ModelToRepresentation {
         rep.setFailureFactor(realm.getFailureFactor());
         if (realm.getAttribute("bruteForcePropertyFailureFactor") != null) {
             rep.setBruteForcePropertyFailureFactor(realm.getBruteForcePropertyFailureFactor());
+        }
+        if (realm.getAttribute("bruteForcePropertyPolicies") != null) {
+            rep.setBruteForcePropertyPolicies(realm.getBruteForcePropertyPolicies());
         }
         rep.setMaxSecondaryAuthFailures(realm.getMaxSecondaryAuthFailures());
         rep.setBruteForceProtectedUserProperties(realm.getBruteForceProtectedUserProperties());

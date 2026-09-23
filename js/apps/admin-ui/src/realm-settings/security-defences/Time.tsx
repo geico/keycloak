@@ -5,10 +5,14 @@ import { TimeSelectorControl } from "../../components/time-selector/TimeSelector
 
 export const Time = ({
   name,
+  labelName = name,
+  defaultValue = "",
   style,
   min,
 }: {
   name: string;
+  labelName?: string;
+  defaultValue?: number | "";
   style?: CSSProperties;
   min?: number;
 }) => {
@@ -17,11 +21,11 @@ export const Time = ({
     <TimeSelectorControl
       name={name}
       style={style}
-      label={t(name)}
-      labelIcon={t(`${name}Help`)}
+      label={t(labelName)}
+      labelIcon={t(`${labelName}Help`)}
       min={min}
       controller={{
-        defaultValue: "",
+        defaultValue,
         rules: { required: t("required"), min: min },
       }}
     />

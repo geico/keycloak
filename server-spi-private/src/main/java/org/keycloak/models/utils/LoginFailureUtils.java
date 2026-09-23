@@ -19,6 +19,8 @@ package org.keycloak.models.utils;
 import java.util.concurrent.TimeUnit;
 
 import org.keycloak.models.RealmModel;
+import org.keycloak.representations.idm.BruteForcePolicyRepresentation;
+import org.keycloak.representations.idm.RealmRepresentation.BruteForceLockPolicy;
 
 /**
  * <p>Shared methods to calculate login failure idle times.</p>
@@ -33,12 +35,50 @@ public class LoginFailureUtils {
      * @return Timestamp in milliseconds, or -1L if the realm will never expire.
      */
     public static long computeExpirationCutOffTimestampMillis(RealmModel realm, long currentTimeMillis) {
-        if (realm.isPermanentLockout() && realm.getMaxTemporaryLockouts() == 0) {
+        if (hasNonExpiringFailures(realm)) {
             // If mode is permanent lockout only, the "failure reset time" cannot be configured and login failures should never expire.
             return -1L;
         }
         // expired if last-failure + max-delta-time < current time
-        return currentTimeMillis - TimeUnit.SECONDS.toMillis(realm.getMaxDeltaTimeSeconds());
+        return currentTimeMillis - TimeUnit.SECONDS.toMillis(getMaxDeltaTimeSeconds(realm));
+    }
+
+    /**
+     * Login-failure providers expire entries per realm rather than per counter key. Retain all
+     * entries for the longest effective property reset window so a longer property override is not
+     * evicted early.
+     */
+    public static int getMaxDeltaTimeSeconds(RealmModel realm) {
+        if (realm.getBruteForceLockPolicy() == BruteForceLockPolicy.USER) {
+            return realm.getMaxDeltaTimeSeconds();
+        }
+        return realm.getBruteForcePropertyPolicies().values().stream()
+                .map(BruteForcePolicyRepresentation::getMaxDeltaTimeSeconds)
+                .filter(value -> value != null)
+                .reduce(realm.getMaxDeltaTimeSeconds(), Math::max);
+    }
+
+    /**
+     * A permanent-only property counter must survive provider cleanup even when the realm's account
+     * policy is temporary. Providers cannot safely distinguish hashed property keys, so retention
+     * is conservatively realm-wide.
+     */
+    public static boolean hasNonExpiringFailures(RealmModel realm) {
+        if (realm.isPermanentLockout() && realm.getMaxTemporaryLockouts() == 0) {
+            return true;
+        }
+        if (realm.getBruteForceLockPolicy() == BruteForceLockPolicy.USER) {
+            return false;
+        }
+        return realm.getBruteForcePropertyPolicies().values().stream().anyMatch(policy -> {
+            boolean permanent = policy.isPermanentLockout() == null
+                    ? realm.isPermanentLockout()
+                    : policy.isPermanentLockout();
+            int temporaryLockouts = policy.getMaxTemporaryLockouts() == null
+                    ? realm.getMaxTemporaryLockouts()
+                    : policy.getMaxTemporaryLockouts();
+            return permanent && temporaryLockouts == 0;
+        });
     }
 
 }

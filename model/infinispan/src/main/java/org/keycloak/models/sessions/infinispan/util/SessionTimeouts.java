@@ -27,6 +27,7 @@ import org.keycloak.models.sessions.infinispan.entities.AuthenticatedClientSessi
 import org.keycloak.models.sessions.infinispan.entities.LoginFailureEntity;
 import org.keycloak.models.sessions.infinispan.entities.RootAuthenticationSessionEntity;
 import org.keycloak.models.sessions.infinispan.entities.UserSessionEntity;
+import org.keycloak.models.utils.LoginFailureUtils;
 import org.keycloak.models.utils.SessionExpiration;
 import org.keycloak.models.utils.SessionExpirationUtils;
 
@@ -205,7 +206,8 @@ public class SessionTimeouts {
      * @return
      */
     public static long getLoginFailuresLifespanMs(RealmModel realm, ClientModel client, LoginFailureEntity loginFailureEntity) {
-        return getLoginFailuresLifespanMs(realm.isPermanentLockout(), realm.getMaxTemporaryLockouts(), realm.getMaxDeltaTimeSeconds() * 1000L, loginFailureEntity);
+        return getLoginFailuresLifespanMs(LoginFailureUtils.hasNonExpiringFailures(realm), 0,
+                LoginFailureUtils.getMaxDeltaTimeSeconds(realm) * 1000L, loginFailureEntity);
     }
 
     public static long getLoginFailuresLifespanMs(boolean isPermanentLockout, int maxTemporaryLockouts, long maxDeltaTimeMillis, LoginFailureEntity loginFailureEntity) {

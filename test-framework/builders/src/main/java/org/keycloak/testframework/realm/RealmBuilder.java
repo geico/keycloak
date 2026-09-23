@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Map;
 
 import org.keycloak.models.jpa.entities.RealmAttributes;
+import org.keycloak.representations.idm.BruteForcePolicyRepresentation;
 import org.keycloak.representations.idm.ClientPoliciesRepresentation;
 import org.keycloak.representations.idm.ClientPolicyRepresentation;
 import org.keycloak.representations.idm.ClientProfileRepresentation;
@@ -430,6 +431,15 @@ public class RealmBuilder extends Builder<RealmRepresentation> {
 
     public RealmBuilder bruteForcePropertyFailureFactor(int count) {
         rep.setBruteForcePropertyFailureFactor(count);
+        return this;
+    }
+
+    public RealmBuilder bruteForcePropertyPolicy(String property, BruteForcePolicyRepresentation policy) {
+        Map<String, BruteForcePolicyRepresentation> policies = rep.getBruteForcePropertyPolicies() == null
+                ? new HashMap<>()
+                : new HashMap<>(rep.getBruteForcePropertyPolicies());
+        policies.put(property, policy);
+        rep.setBruteForcePropertyPolicies(policies);
         return this;
     }
 

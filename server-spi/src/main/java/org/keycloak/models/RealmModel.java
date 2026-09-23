@@ -17,7 +17,9 @@
 
 package org.keycloak.models;
 
+import java.io.IOException;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -27,7 +29,11 @@ import org.keycloak.common.enums.SslRequired;
 import org.keycloak.component.ComponentModel;
 import org.keycloak.provider.Provider;
 import org.keycloak.provider.ProviderEvent;
+import org.keycloak.representations.idm.BruteForcePolicyRepresentation;
 import org.keycloak.representations.idm.RealmRepresentation;
+import org.keycloak.util.JsonSerialization;
+
+import com.fasterxml.jackson.core.type.TypeReference;
 
 /**
  * @author <a href="mailto:bill@burkecentral.com">Bill Burke</a>
@@ -218,9 +224,13 @@ public interface RealmModel extends RoleContainerModel {
                         .toList();
         if (normalized.isEmpty()) {
             removeAttribute("bruteForceProtectedUserProperties");
+            removeAttribute("bruteForcePropertyPolicies");
             return;
         }
         setAttribute("bruteForceProtectedUserProperties", String.join("\n", normalized));
+        Map<String, BruteForcePolicyRepresentation> policies = new LinkedHashMap<>(getBruteForcePropertyPolicies());
+        policies.keySet().retainAll(normalized);
+        setBruteForcePropertyPolicies(policies);
     }
     /**
      * Which brute-force counters may disable login. Defaults to
@@ -257,6 +267,42 @@ public interface RealmModel extends RoleContainerModel {
             return;
         }
         setAttribute("bruteForcePropertyFailureFactor", Integer.toString(failureFactor));
+    }
+
+    /**
+     * Optional policy overrides keyed by protected user-property name. Missing fields inherit the
+     * corresponding realm setting; a missing failure factor first inherits
+     * {@link #getBruteForcePropertyFailureFactor()}.
+     */
+    default Map<String, BruteForcePolicyRepresentation> getBruteForcePropertyPolicies() {
+        String value = getAttribute("bruteForcePropertyPolicies");
+        if (value == null || value.isBlank()) {
+            return Map.of();
+        }
+        try {
+            Map<String, BruteForcePolicyRepresentation> policies = JsonSerialization.readValue(value,
+                    new TypeReference<>() {
+                    });
+            return policies == null ? Map.of() : Map.copyOf(policies);
+        } catch (IOException cause) {
+            throw new IllegalStateException("Invalid brute-force property policies", cause);
+        }
+    }
+
+    default void setBruteForcePropertyPolicies(Map<String, BruteForcePolicyRepresentation> policies) {
+        Map<String, BruteForcePolicyRepresentation> normalized = new LinkedHashMap<>();
+        if (policies != null) {
+            policies.forEach((property, policy) -> {
+                if (property != null && !property.isBlank() && policy != null) {
+                    normalized.put(property.trim(), policy);
+                }
+            });
+        }
+        if (normalized.isEmpty()) {
+            removeAttribute("bruteForcePropertyPolicies");
+            return;
+        }
+        setAttribute("bruteForcePropertyPolicies", JsonSerialization.valueAsString(normalized));
     }
 
     /**

@@ -10,6 +10,9 @@ import {
   assertXFrameOptionsSecurityHeaderValue,
   clickSaveSecurityDefenses,
   selectBruteForceMode,
+  selectBruteForceLockPolicy,
+  selectProtectedUserProperties,
+  configureEmailPropertyPolicy,
   selectProtectedAuthChannels,
   selectAuthChannelLockScope,
   fillMaxChannelFailures,
@@ -52,6 +55,9 @@ test.describe.serial("Security defenses", () => {
     await fillMaxFailureWaitSeconds(page, "1");
     await fillMaxDeltaTimeSeconds(page, "1");
     await fillMinimumQuickLoginWaitSeconds(page, "1");
+    await selectBruteForceLockPolicy(page, "Shared properties only");
+    await selectProtectedUserProperties(page, ["username", "email"]);
+    await configureEmailPropertyPolicy(page);
     await selectProtectedAuthChannels(page, ["password", "otp"]);
     await selectAuthChannelLockScope(page, "Lock only that channel");
     await fillMaxChannelFailures(page, "2");
@@ -62,6 +68,14 @@ test.describe.serial("Security defenses", () => {
     expect(realm?.bruteForceProtectedAuthChannels).toEqual(["password", "otp"]);
     expect(realm?.bruteForceChannelLockScope).toBe("CHANNEL");
     expect(realm?.bruteForceChannelFailureFactor).toBe(2);
+    expect(realm?.bruteForcePropertyPolicies?.email).toMatchObject({
+      permanentLockout: false,
+      failureFactor: 3,
+      waitIncrementSeconds: 5,
+      maxFailureWaitSeconds: 10,
+      maxDeltaTimeSeconds: 1,
+      minimumQuickLoginWaitSeconds: 1,
+    });
   });
 
   test("Realm header settings followed by Brute force detection", async ({

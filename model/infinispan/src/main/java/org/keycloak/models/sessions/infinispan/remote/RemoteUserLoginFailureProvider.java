@@ -32,6 +32,7 @@ import org.keycloak.models.sessions.infinispan.query.QueryHelper;
 import org.keycloak.models.sessions.infinispan.remote.transaction.LoginFailureChangeLogTransaction;
 import org.keycloak.models.sessions.infinispan.stream.ValueIdentityBiFunction;
 import org.keycloak.models.sessions.infinispan.util.SessionTimeouts;
+import org.keycloak.models.utils.LoginFailureUtils;
 
 import io.reactivex.rxjava3.schedulers.Schedulers;
 import org.infinispan.client.hotrod.RemoteCache;
@@ -96,9 +97,9 @@ public class RemoteUserLoginFailureProvider implements UserLoginFailureProvider 
             return;
         }
         RemoteCache<LoginFailureKey, LoginFailureEntity> cache = transaction.getCache();
-        final long maxDeltaTimeMillis = realm.getMaxDeltaTimeSeconds() * 1000L;
-        final boolean isPermanentLockout = realm.isPermanentLockout();
-        final int maxTemporaryLockouts = realm.getMaxTemporaryLockouts();
+        final long maxDeltaTimeMillis = LoginFailureUtils.getMaxDeltaTimeSeconds(realm) * 1000L;
+        final boolean isPermanentLockout = LoginFailureUtils.hasNonExpiringFailures(realm);
+        final int maxTemporaryLockouts = 0;
         Query<LoginFailureEntity> query = LoginFailureQueries.searchByRealmId(cache, realm.getId());
         CompletionStages.performConcurrently(
                 QueryHelper.streamAll(query, 20, Function.identity()),

@@ -177,14 +177,14 @@ public class AttackDetectionResource {
     }
 
     private Map<String, Object> bruteForcePropertyStatus(UserModel user, String property) {
-        return bruteForceCounterStatus(BruteForceUserProperty.getFailureKeys(realm, user, property));
+        return bruteForceCounterStatus(user, BruteForceUserProperty.getFailureKeys(realm, user, property));
     }
 
     private Map<String, Object> bruteForceChannelStatus(UserModel user, String channel) {
-        return bruteForceCounterStatus(BruteForceAuthChannel.getFailureKeys(realm, user, channel));
+        return bruteForceCounterStatus(user, BruteForceAuthChannel.getFailureKeys(realm, user, channel));
     }
 
-    private Map<String, Object> bruteForceCounterStatus(List<String> failureKeys) {
+    private Map<String, Object> bruteForceCounterStatus(UserModel user, List<String> failureKeys) {
         Map<String, Object> data = new HashMap<>();
         data.put("disabled", false);
         data.put("numFailures", 0);
@@ -208,7 +208,7 @@ public class AttackDetectionResource {
             data.put("numTemporaryLockouts",
                     Math.max((int) data.get("numTemporaryLockouts"), model.getNumTemporaryLockouts()));
             failedLoginNotBefore = Math.max(failedLoginNotBefore, model.getFailedLoginNotBefore());
-            permanentlyLocked |= BruteForceUserProperty.isPermanentlyLocked(realm, model, failureKey);
+            permanentlyLocked |= BruteForceUserProperty.isPermanentlyLocked(realm, user, model, failureKey);
             if (latestFailure == null || model.getLastFailure() > latestFailure.getLastFailure()) {
                 latestFailure = model;
             }

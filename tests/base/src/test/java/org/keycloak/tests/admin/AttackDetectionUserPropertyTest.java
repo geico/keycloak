@@ -27,6 +27,7 @@ import jakarta.ws.rs.BadRequestException;
 import org.keycloak.admin.client.resource.AttackDetectionResource;
 import org.keycloak.admin.client.resource.UserProfileResource;
 import org.keycloak.models.UserModel;
+import org.keycloak.representations.idm.BruteForcePolicyRepresentation;
 import org.keycloak.representations.idm.RealmRepresentation;
 import org.keycloak.representations.idm.RealmRepresentation.BruteForceLockPolicy;
 import org.keycloak.representations.idm.UserRepresentation;
@@ -142,6 +143,100 @@ public class AttackDetectionUserPropertyTest {
             assertPropertyLocked(detection, otherSalesUser, UserModel.EMAIL, false);
             assertFalse((Boolean) detection.bruteForceUserStatus(otherSalesUser.getId()).get("disabled"));
         });
+    }
+
+    @Test
+    public void namedPropertiesUseIndependentPolicyOverrides() {
+        BruteForcePolicyRepresentation emailPolicy = new BruteForcePolicyRepresentation();
+        emailPolicy.setFailureFactor(1);
+        emailPolicy.setPermanentLockout(false);
+        emailPolicy.setWaitIncrementSeconds(60);
+        emailPolicy.setMaxFailureWaitSeconds(60);
+        BruteForcePolicyRepresentation usernamePolicy = new BruteForcePolicyRepresentation();
+        usernamePolicy.setFailureFactor(3);
+
+        withPropertyPolicies(Map.of(UserModel.EMAIL, emailPolicy, UserModel.USERNAME, usernamePolicy), () -> {
+            RealmRepresentation stored = managedRealm.admin().toRepresentation();
+            assertEquals(1, stored.getBruteForcePropertyPolicies().get(UserModel.EMAIL).getFailureFactor());
+            assertEquals(3, stored.getBruteForcePropertyPolicies().get(UserModel.USERNAME).getFailureFactor());
+
+            AttackDetectionResource detection = managedRealm.admin().attackDetection();
+            failLogin(salesUser, salesUser.admin().toRepresentation().getEmail(), 1);
+            assertPropertyLocked(detection, salesUser, UserModel.EMAIL, true);
+            assertPropertyLocked(detection, salesUser, UserModel.USERNAME, false);
+
+            failLogin(salesUser, salesUser.getUsername(), 2);
+            assertPropertyLocked(detection, salesUser, UserModel.USERNAME, false);
+            assertPropertyLocked(detection, salesUser, UserModel.EMAIL, true);
+        });
+    }
+
+    @Test
+    public void namedPropertiesUseDifferentLockTimeouts() {
+        BruteForcePolicyRepresentation emailPolicy = temporaryPolicy(1, 10);
+        BruteForcePolicyRepresentation usernamePolicy = temporaryPolicy(1, 60);
+
+        withPropertyPolicies(Map.of(UserModel.EMAIL, emailPolicy, UserModel.USERNAME, usernamePolicy), () -> {
+            AttackDetectionResource detection = managedRealm.admin().attackDetection();
+            failLogin(salesUser, salesUser.admin().toRepresentation().getEmail(), 1);
+            failLogin(salesUser, salesUser.getUsername(), 1);
+
+            Map<String, Map<String, Object>> status =
+                    properties(detection.bruteForceUserStatus(salesUser.getId()));
+            long emailNotBefore = ((Number) status.get(UserModel.EMAIL).get("failedLoginNotBefore")).longValue();
+            long usernameNotBefore = ((Number) status.get(UserModel.USERNAME).get("failedLoginNotBefore")).longValue();
+            assertTrue(usernameNotBefore - emailNotBefore >= 45);
+        });
+    }
+
+    @Test
+    public void propertyCanBePermanentWhileRealmPolicyIsTemporary() {
+        BruteForcePolicyRepresentation emailPolicy = new BruteForcePolicyRepresentation();
+        emailPolicy.setFailureFactor(1);
+        emailPolicy.setPermanentLockout(true);
+        emailPolicy.setMaxTemporaryLockouts(0);
+
+        withPropertyPolicies(Map.of(UserModel.EMAIL, emailPolicy), () -> {
+            AttackDetectionResource detection = managedRealm.admin().attackDetection();
+            failLogin(salesUser, salesUser.admin().toRepresentation().getEmail(), 1);
+
+            Map<String, Object> status = detection.bruteForceUserStatus(salesUser.getId());
+            assertPropertyLocked(detection, salesUser, UserModel.EMAIL, true);
+            assertEquals(Long.MAX_VALUE,
+                    ((Number) properties(status).get(UserModel.EMAIL).get("failedLoginNotBefore")).longValue());
+            assertFalse((Boolean) status.get("disabled"));
+        });
+    }
+
+    @Test
+    public void rejectsPolicyForAnUnprotectedProperty() {
+        BruteForcePolicyRepresentation policy = new BruteForcePolicyRepresentation();
+        policy.setFailureFactor(1);
+        RealmRepresentation realm = managedRealm.admin().toRepresentation();
+        realm.setBruteForcePropertyPolicies(Map.of("phoneNumber", policy));
+
+        assertThrows(BadRequestException.class, () -> managedRealm.admin().update(realm));
+    }
+
+    @Test
+    public void rejectsPropertyPolicyForTheAccountIdCounter() {
+        withProtectedProperties(List.of(ID), () -> {
+            BruteForcePolicyRepresentation policy = new BruteForcePolicyRepresentation();
+            policy.setFailureFactor(1);
+            RealmRepresentation realm = managedRealm.admin().toRepresentation();
+            realm.setBruteForcePropertyPolicies(Map.of(ID, policy));
+
+            assertThrows(BadRequestException.class, () -> managedRealm.admin().update(realm));
+        });
+    }
+
+    private static BruteForcePolicyRepresentation temporaryPolicy(int failures, int waitSeconds) {
+        BruteForcePolicyRepresentation policy = new BruteForcePolicyRepresentation();
+        policy.setFailureFactor(failures);
+        policy.setPermanentLockout(false);
+        policy.setWaitIncrementSeconds(waitSeconds);
+        policy.setMaxFailureWaitSeconds(waitSeconds);
+        return policy;
     }
 
     @ParameterizedTest
@@ -398,6 +493,26 @@ public class AttackDetectionUserPropertyTest {
     }
 
     @Test
+    public void temporaryPropertyOverrideDoesNotKeepPermanentAccountDisabled() {
+        BruteForcePolicyRepresentation emailPolicy = temporaryPolicy(2, 60);
+        withLockPolicy(BruteForceLockPolicy.ANY, () -> withPermanentLockout(
+                () -> withPropertyPolicies(Map.of(UserModel.EMAIL, emailPolicy), () -> {
+                    AttackDetectionResource detection = managedRealm.admin().attackDetection();
+                    String email = salesUser.admin().toRepresentation().getEmail();
+                    failLogin(salesUser, email, 2);
+
+                    assertFalse(salesUser.admin().toRepresentation().isEnabled());
+                    assertPropertyLocked(detection, salesUser, ID, true);
+                    assertPropertyLocked(detection, salesUser, UserModel.EMAIL, true);
+
+                    detection.clearBruteForceForUserByProperty(salesUser.getId(), ID);
+
+                    assertTrue(salesUser.admin().toRepresentation().isEnabled());
+                    assertPropertyLocked(detection, salesUser, UserModel.EMAIL, true);
+                })));
+    }
+
+    @Test
     public void unlockingTheLockingPropertyKeepsOtherPropertyCounters() {
         withFailureFactors(10, 2, () -> withPermanentLockout(() -> {
             AttackDetectionResource detection = managedRealm.admin().attackDetection();
@@ -486,6 +601,20 @@ public class AttackDetectionUserPropertyTest {
             RealmRepresentation restore = managedRealm.admin().toRepresentation();
             restore.setFailureFactor(previousFailureFactor);
             restore.setBruteForcePropertyFailureFactor(previousPropertyFactor);
+            managedRealm.admin().update(restore);
+        }
+    }
+
+    private void withPropertyPolicies(Map<String, BruteForcePolicyRepresentation> policies, Runnable test) {
+        RealmRepresentation realm = managedRealm.admin().toRepresentation();
+        Map<String, BruteForcePolicyRepresentation> previous = realm.getBruteForcePropertyPolicies();
+        realm.setBruteForcePropertyPolicies(policies);
+        managedRealm.admin().update(realm);
+        try {
+            test.run();
+        } finally {
+            RealmRepresentation restore = managedRealm.admin().toRepresentation();
+            restore.setBruteForcePropertyPolicies(previous == null ? Map.of() : previous);
             managedRealm.admin().update(restore);
         }
     }

@@ -9,6 +9,18 @@ import type ClientProfilesRepresentation from "./clientProfilesRepresentation.js
 import type ClientPoliciesRepresentation from "./clientPoliciesRepresentation.js";
 import type RoleRepresentation from "./roleRepresentation.js";
 
+export interface BruteForcePolicyRepresentation {
+  permanentLockout?: boolean;
+  maxTemporaryLockouts?: number;
+  bruteForceStrategy?: "MULTIPLE" | "LINEAR";
+  maxFailureWaitSeconds?: number;
+  minimumQuickLoginWaitSeconds?: number;
+  waitIncrementSeconds?: number;
+  quickLoginCheckMilliSeconds?: number;
+  maxDeltaTimeSeconds?: number;
+  failureFactor?: number;
+}
+
 /**
  * https://www.keycloak.org/docs-api/11.0/rest-api/index.html#_realmrepresentation
  */
@@ -68,6 +80,7 @@ export default interface RealmRepresentation {
   eventsListeners?: string[];
   failureFactor?: number;
   bruteForcePropertyFailureFactor?: number;
+  bruteForcePropertyPolicies?: Record<string, BruteForcePolicyRepresentation>;
   bruteForceChannelFailureFactor?: number;
   maxSecondaryAuthFailures?: number;
   federatedUsers?: UserRepresentation[];
