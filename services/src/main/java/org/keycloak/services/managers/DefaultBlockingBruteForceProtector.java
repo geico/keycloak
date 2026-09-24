@@ -137,22 +137,40 @@ public class DefaultBlockingBruteForceProtector extends DefaultBruteForceProtect
 
     @Override
     protected void processLogin(RealmModel realm, UserModel user, ClientConnection clientConnection, UriInfo uriInfo, boolean success, Set<String> categories) {
+        processLogin(realm, user, clientConnection, uriInfo, success, categories, null);
+    }
+
+    @Override
+    protected void processLogin(RealmModel realm, UserModel user, ClientConnection clientConnection, UriInfo uriInfo,
+            boolean success, Set<String> categories, String attemptedIdentifier) {
         // mark the off-thread is started for this request
         loginAttempts.computeIfPresent(user.getId(), (k, v) -> v + OFF_THREAD_STARTED);
-        super.processLogin(realm, user, clientConnection, uriInfo, success, categories);
+        super.processLogin(realm, user, clientConnection, uriInfo, success, categories, attemptedIdentifier);
     }
 
     @Override
     public void failure(KeycloakSession session, RealmModel realm, String userId, String remoteAddr, long failureTime, Set<String> categories) {
+        failure(session, realm, userId, remoteAddr, failureTime, categories, null);
+    }
+
+    @Override
+    public void failure(KeycloakSession session, RealmModel realm, String userId, String remoteAddr, long failureTime,
+            Set<String> categories, String attemptedIdentifier) {
         // remove the user from concurrent login attemps once it's processed
         enlistRemoval(session, userId);
-        super.failure(session, realm, userId, remoteAddr, failureTime, categories);
+        super.failure(session, realm, userId, remoteAddr, failureTime, categories, attemptedIdentifier);
     }
 
     @Override
     protected void success(KeycloakSession session, RealmModel realm, String userId, Set<String> categories) {
+        success(session, realm, userId, categories, null);
+    }
+
+    @Override
+    protected void success(KeycloakSession session, RealmModel realm, String userId, Set<String> categories,
+            String attemptedIdentifier) {
         // remove the user from concurrent login attempts once it's processed
         enlistRemoval(session, userId);
-        super.success(session, realm, userId, categories);
+        super.success(session, realm, userId, categories, attemptedIdentifier);
     }
 }

@@ -231,6 +231,9 @@ public class DefaultExportImportManager implements ExportImportManager {
         if (rep.getMaxDeltaTimeSeconds() != null) newRealm.setMaxDeltaTimeSeconds(checkNonNegativeNumber(rep.getMaxDeltaTimeSeconds(),"Maximum delta time seconds"));
         if (rep.getFailureFactor() != null) newRealm.setFailureFactor(checkNonNegativeNumber(rep.getFailureFactor(),"Failure factor"));
         if (rep.getMaxSecondaryAuthFailures() != null) newRealm.setMaxSecondaryAuthFailures(checkNonNegativeNumber(rep.getMaxSecondaryAuthFailures(),"Maximum secondary authentication failures"));
+        if (rep.getBruteForceProtectedUserProperties() != null) newRealm.setBruteForceProtectedUserProperties(rep.getBruteForceProtectedUserProperties());
+        if (rep.getBruteForceLockPolicy() != null) newRealm.setBruteForceLockPolicy(rep.getBruteForceLockPolicy());
+        if (rep.isBruteForceIndependentRecoveryAuthnCodes() != null) newRealm.setBruteForceIndependentRecoveryAuthnCodes(rep.isBruteForceIndependentRecoveryAuthnCodes());
         if (rep.isEventsEnabled() != null) newRealm.setEventsEnabled(rep.isEventsEnabled());
         if (rep.getEnabledEventTypes() != null)
             newRealm.setEnabledEventTypes(new HashSet<>(rep.getEnabledEventTypes()));
@@ -837,6 +840,9 @@ public class DefaultExportImportManager implements ExportImportManager {
         if (rep.getMaxDeltaTimeSeconds() != null) realm.setMaxDeltaTimeSeconds(checkNonNegativeNumber(rep.getMaxDeltaTimeSeconds(),"Maximum delta time seconds"));
         if (rep.getFailureFactor() != null) realm.setFailureFactor(checkNonNegativeNumber(rep.getFailureFactor(),"Failure factor"));
         if (rep.getMaxSecondaryAuthFailures() != null) realm.setMaxSecondaryAuthFailures(checkNonNegativeNumber(rep.getMaxSecondaryAuthFailures(), "Maximum secondary authentication failures"));
+        if (rep.getBruteForceProtectedUserProperties() != null) realm.setBruteForceProtectedUserProperties(rep.getBruteForceProtectedUserProperties());
+        if (rep.getBruteForceLockPolicy() != null) realm.setBruteForceLockPolicy(rep.getBruteForceLockPolicy());
+        if (rep.isBruteForceIndependentRecoveryAuthnCodes() != null) realm.setBruteForceIndependentRecoveryAuthnCodes(rep.isBruteForceIndependentRecoveryAuthnCodes());
         if (rep.isRegistrationAllowed() != null) realm.setRegistrationAllowed(rep.isRegistrationAllowed());
         if (rep.isRegistrationEmailAsUsername() != null)
             realm.setRegistrationEmailAsUsername(rep.isRegistrationEmailAsUsername());
