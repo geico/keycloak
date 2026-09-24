@@ -25,7 +25,12 @@ import java.util.Map;
 import jakarta.mail.MessagingException;
 import jakarta.mail.internet.MimeMessage;
 import jakarta.ws.rs.BadRequestException;
+import jakarta.ws.rs.client.Client;
+import jakarta.ws.rs.core.GenericType;
+import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.Response;
 
+import org.keycloak.admin.client.resource.BearerAuthFilter;
 import org.keycloak.admin.client.resource.UsersResource;
 import org.keycloak.events.Details;
 import org.keycloak.events.Errors;
@@ -54,11 +59,13 @@ import org.keycloak.testsuite.pages.LoginPasswordUpdatePage;
 import org.keycloak.testsuite.pages.LoginTotpPage;
 import org.keycloak.testsuite.pages.RegisterPage;
 import org.keycloak.testsuite.updaters.RealmAttributeUpdater;
+import org.keycloak.testsuite.util.AdminClientUtil;
 import org.keycloak.testsuite.util.MailServer;
 import org.keycloak.testsuite.util.MailUtils;
 import org.keycloak.testsuite.util.RealmRepUtil;
 import org.keycloak.testsuite.util.WaitUtils;
 import org.keycloak.testsuite.util.oauth.AccessTokenResponse;
+import org.keycloak.testsuite.util.oauth.OAuthClient;
 import org.keycloak.testsuite.util.runonserver.RunHelpers;
 
 import org.hamcrest.MatcherAssert;
@@ -111,7 +118,9 @@ public class BruteForceTest extends AbstractChangeImportedUserPasswordsTest {
     public void configureTestRealm(RealmRepresentation testRealm) {
         super.configureTestRealm(testRealm);
         UserRepresentation user = RealmRepUtil.findUser(testRealm, "test-user@localhost");
-        UserBuilder.update(user).totpSecret("totpSecret").emailVerified(true);
+        UserBuilder.update(user).totpSecret("totpSecret").emailVerified(true)
+                .attribute("department", "sales")
+                .attribute("phoneNumber", "+15550001");
 
         testRealm.setBruteForceProtected(true);
         testRealm.setBruteForceStrategy(RealmRepresentation.BruteForceStrategy.MULTIPLE);
@@ -123,7 +132,15 @@ public class BruteForceTest extends AbstractChangeImportedUserPasswordsTest {
         testRealm.setMaxSecondaryAuthFailures(10);
 
         RealmRepUtil.findClientByClientId(testRealm, "test-app").setDirectAccessGrantsEnabled(true);
-        testRealm.getUsers().add(UserBuilder.create().username("user2").email("user2@localhost").password(generatePassword("user2")).build());
+        testRealm.getUsers().add(UserBuilder.create().username("user2").email("user2@localhost")
+                .password(generatePassword("user2")).attribute("phoneNumber", "+15550002").build());
+        testRealm.getUsers().add(UserBuilder.create()
+                .username("user3")
+                .email("user3@localhost")
+                .password(generatePassword("user3"))
+                .attribute("department", "sales")
+                .attribute("phoneNumber", "+15550003")
+                .build());
     }
 
     @Before
@@ -139,6 +156,7 @@ public class BruteForceTest extends AbstractChangeImportedUserPasswordsTest {
             realm.setMaxFailureWaitSeconds(100);
             realm.setWaitIncrementSeconds(20);
             realm.setOtpPolicyCodeReusable(true);
+            realm.setBruteForceProtectedUserProperties(Collections.emptyList());
             adminClient.realm("test").update(realm);
         } catch (Exception e) {
             throw new RuntimeException(e);
@@ -160,6 +178,7 @@ public class BruteForceTest extends AbstractChangeImportedUserPasswordsTest {
             realm.setQuickLoginCheckMilliSeconds(1000L);
             realm.setMaxDeltaTimeSeconds(60 * 60 * 12); // 12 hours
             realm.setFailureFactor(30);
+            realm.setBruteForceProtectedUserProperties(Collections.emptyList());
             adminClient.realm("test").update(realm);
         } catch (Exception e) {
             throw new RuntimeException(e);
@@ -253,6 +272,156 @@ public class BruteForceTest extends AbstractChangeImportedUserPasswordsTest {
             ErrorRepresentation error = ex.getResponse().readEntity(ErrorRepresentation.class);
             assertEquals("Maximum delta time seconds may not be a negative value",  error.getErrorMessage());
         }
+    }
+
+    @Test
+    public void testLockPolicyUserLocksOnlyTheFailedAccount() throws Exception {
+        withSharedPropertyLockPolicy(RealmRepresentation.BruteForceLockPolicy.USER, () -> {
+            AccessTokenResponse phoneLogin = oauth.passwordGrantRequest("+15550003", getPassword("user3")).send();
+            Assertions.assertNotNull(phoneLogin.getAccessToken());
+            events.clear();
+
+            failLoginUntilLockout();
+
+            String userId = testUserId();
+            String user3Id = adminClient.realm("test").users().search("user3", 0, 1).get(0).getId();
+            Map<String, Object> status = adminClient.realm("test").attackDetection().bruteForceUserStatus(userId);
+            Assertions.assertEquals(Boolean.TRUE, status.get("disabled"));
+            Assertions.assertEquals(Boolean.FALSE,
+                    adminClient.realm("test").attackDetection().bruteForceUserStatus(user3Id).get("disabled"));
+            AccessTokenResponse response = oauth.passwordGrantRequest("user3", getPassword("user3")).send();
+            Assertions.assertNotNull(response.getAccessToken());
+            events.clear();
+            expectTemporarilyDisabled();
+        });
+    }
+
+    @Test
+    public void testLockPolicyPropertiesDoesNotLockOtherIdentifiers() throws Exception {
+        withSharedPropertyLockPolicy(RealmRepresentation.BruteForceLockPolicy.PROPERTIES, () -> {
+            loginInvalidPassword("user2@localhost");
+            loginInvalidPassword("user2@localhost");
+            WaitUtils.waitForBruteForceExecutors(testingClient);
+
+            AccessTokenResponse byUsername = oauth.passwordGrantRequest("user2", getPassword("user2")).send();
+            Assertions.assertNotNull(byUsername.getAccessToken());
+            AccessTokenResponse byPhone = oauth.passwordGrantRequest("+15550002", getPassword("user2")).send();
+            Assertions.assertNotNull(byPhone.getAccessToken());
+            events.clear();
+
+            AccessTokenResponse byEmail = oauth.passwordGrantRequest("user2@localhost", getPassword("user2")).send();
+            Assertions.assertNull(byEmail.getAccessToken());
+            Assertions.assertEquals("invalid_grant", byEmail.getError());
+        });
+    }
+
+    @Test
+    public void testLockPolicyPropertiesUnlocksFromTheUserDetailPage() throws Exception {
+        withSharedPropertyLockPolicy(RealmRepresentation.BruteForceLockPolicy.PROPERTIES, () -> {
+            loginInvalidPassword("user2@localhost");
+            loginInvalidPassword("user2@localhost");
+            WaitUtils.waitForBruteForceExecutors(testingClient);
+            events.clear();
+
+            String userId = adminClient.realm("test").users().search("user2", 0, 1).get(0).getId();
+            Assertions.assertEquals(Boolean.TRUE,
+                    adminClient.realm("test").attackDetection().bruteForceUserStatus(userId).get("disabled"));
+            Assertions.assertNull(
+                    oauth.passwordGrantRequest("user2@localhost", getPassword("user2")).send().getAccessToken());
+
+            // The Admin Console unlock switch enables the user, which has to clear the property counter too.
+            UserRepresentation user = adminClient.realm("test").users().get(userId).toRepresentation();
+            user.setEnabled(true);
+            adminClient.realm("test").users().get(userId).update(user);
+
+            Assertions.assertEquals(Boolean.FALSE,
+                    adminClient.realm("test").attackDetection().bruteForceUserStatus(userId).get("disabled"));
+            Assertions.assertNotNull(
+                    oauth.passwordGrantRequest("user2@localhost", getPassword("user2")).send().getAccessToken());
+            events.clear();
+        });
+    }
+
+    @Test
+    public void testLockPolicyPropertiesShowsPermanentLockOnUsersList() throws Exception {
+        RealmRepresentation realm = adminClient.realm("test").toRepresentation();
+        Boolean originalPermanentLockout = realm.isPermanentLockout();
+        Integer originalMaxTemporaryLockouts = realm.getMaxTemporaryLockouts();
+        try {
+            realm.setPermanentLockout(true);
+            realm.setMaxTemporaryLockouts(0);
+            adminClient.realm("test").update(realm);
+
+            withSharedPropertyLockPolicy(RealmRepresentation.BruteForceLockPolicy.PROPERTIES, () -> {
+                loginInvalidPassword("user2@localhost");
+                loginInvalidPassword("user2@localhost");
+                WaitUtils.waitForBruteForceExecutors(testingClient);
+
+                String userId = adminClient.realm("test").users().search("user2", 0, 1).get(0).getId();
+                Map<String, Object> status = adminClient.realm("test").attackDetection().bruteForceUserStatus(userId);
+                Assertions.assertEquals(Boolean.TRUE, status.get("disabled"));
+                Assertions.assertEquals(Long.MAX_VALUE, ((Number) status.get("failedLoginNotBefore")).longValue());
+                Assertions.assertTrue(bruteForceUsersListDisabled("user2"));
+            });
+        } finally {
+            realm.setPermanentLockout(originalPermanentLockout);
+            realm.setMaxTemporaryLockouts(originalMaxTemporaryLockouts);
+            adminClient.realm("test").update(realm);
+        }
+    }
+
+    private String testUserId() {
+        return adminClient.realm("test").users().search("test-user@localhost", 0, 1).get(0).getId();
+    }
+
+    private void failLoginUntilLockout() {
+        loginInvalidPassword();
+        loginInvalidPassword();
+        WaitUtils.waitForBruteForceExecutors(testingClient);
+    }
+
+    private void withSharedPropertyLockPolicy(RealmRepresentation.BruteForceLockPolicy policy,
+            LockPolicyBody test) throws Exception {
+        RealmRepresentation realm = adminClient.realm("test").toRepresentation();
+        try {
+            realm.setBruteForceProtectedUserProperties(List.of("username", "email", "department", "phoneNumber"));
+            realm.setBruteForceLockPolicy(policy);
+            adminClient.realm("test").update(realm);
+
+            RealmRepresentation stored = adminClient.realm("test").toRepresentation();
+            Assertions.assertEquals(List.of("username", "email", "department", "phoneNumber"), stored.getBruteForceProtectedUserProperties());
+            Assertions.assertEquals(policy, stored.getBruteForceLockPolicy());
+            test.run();
+        } finally {
+            realm.setBruteForceProtectedUserProperties(Collections.emptyList());
+            realm.setBruteForceLockPolicy(RealmRepresentation.BruteForceLockPolicy.USER);
+            adminClient.realm("test").update(realm);
+            clearAllUserFailures();
+        }
+    }
+
+    private boolean bruteForceUsersListDisabled(String username) {
+        try (Client client = AdminClientUtil.createResteasyClient()) {
+            Response response = client.target(OAuthClient.AUTH_SERVER_ROOT)
+                    .path("admin/realms/test/ui-ext/brute-force-user")
+                    .queryParam("username", username)
+                    .queryParam("exact", true)
+                    .register(new BearerAuthFilter(adminClient.tokenManager()))
+                    .request(MediaType.APPLICATION_JSON)
+                    .get();
+            Assertions.assertEquals(Response.Status.OK.getStatusCode(), response.getStatus());
+            List<Map<String, Object>> users = response.readEntity(new GenericType<>() {});
+            Assertions.assertFalse(users.isEmpty());
+            @SuppressWarnings("unchecked")
+            Map<String, Object> status = (Map<String, Object>) users.get(0).get("bruteForceStatus");
+            Assertions.assertNotNull(status);
+            return Boolean.TRUE.equals(status.get("disabled"));
+        }
+    }
+
+    @FunctionalInterface
+    private interface LockPolicyBody {
+        void run() throws Exception;
     }
 
     @Test
