@@ -5,8 +5,7 @@
 title="Concepts for multi-cluster deployments (v2)"
 summary="Understand multi-cluster deployment with synchronous replication without an external {jdgserver_name} cluster."
 tileVisible="false"
-preview="true"
-previewDiscussionLink="https://github.com/keycloak/keycloak/discussions/50640" >
+>
 
 This topic describes a highly available multi-cluster setup and the behavior to expect.
 It outlines the requirements of the high availability architecture and describes the benefits and tradeoffs.
@@ -61,8 +60,9 @@ When planning for large batch updates of realm data, consider shutting down all 
 
 Invalidation messages are queued for up to 60 seconds, which is in line with the cluster membership mechanism, which updates its information in the database every 30–45 seconds.
 
-To handle edge cases and to avoid permanently out-of-sync caches, any cached realm information expires by default after one hour.
-The data is then fetched again from the database on the next call that requires it.
+When a {project_name} instance temporarily loses its database connection, it may miss cache invalidation messages sent by other clusters during the outage.
+Once the database connection is restored, all local caches are cleared automatically to ensure consistency.
+As an additional safeguard, any cached realm information expires by default after one hour so that stale entries do not persist indefinitely.
 
 == Causes of data and service loss
 
@@ -114,6 +114,11 @@ Some requests might receive an error message until the load balancer detects the
 ^2^ Estimated Recovery Time. +
 
 The statement "`No data loss`" depends on the setup not being degraded from previous failures, which includes completing any pending manual operations to resynchronize the state between the sites.
+
+For performance, {project_name} uses optimized database commit for ephemeral data such as sessions and events when supported by the configured database.
+On a database crash, in-flight session data within a sub-second window may be lost, requiring affected users to re-authenticate.
+Persistent data such as users, realms, and credentials always uses durable commit and is not affected.
+To disable the optimization, set `--spi-connections-jpa--quarkus--async-commit=false`.
 
 To restore the service, restart any failed {project_name} node and restore its database connectivity. No other recovery operations are necessary for {project_name}.
 A standard load balancer configuration should detect the active {project_name} nodes automatically and route traffic to them.
