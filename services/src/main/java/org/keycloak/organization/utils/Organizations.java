@@ -24,6 +24,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Consumer;
+import java.util.stream.Collectors;
 
 import jakarta.ws.rs.ForbiddenException;
 import jakarta.ws.rs.core.MultivaluedMap;
@@ -55,6 +56,7 @@ import org.keycloak.models.UserModel;
 import org.keycloak.organization.OrganizationProvider;
 import org.keycloak.organization.protocol.mappers.oidc.OrganizationScope;
 import org.keycloak.representations.idm.IdentityProviderRepresentation;
+import org.keycloak.representations.idm.OrganizationIdentityProviderLinkRepresentation;
 import org.keycloak.services.ErrorResponse;
 import org.keycloak.services.Urls;
 import org.keycloak.services.resources.admin.fgap.AdminPermissionEvaluator;
@@ -123,6 +125,19 @@ public class Organizations {
         }
     }
 
+    public static void checkGroupMapperOrgPermission(KeycloakSession session, IdentityProviderMapperModel mapper, AdminPermissionEvaluator auth) {
+        Map<String, String> config = mapper.getConfig();
+        if (config == null || !Type.ORGANIZATION.name().equals(config.get(ConfigConstants.GROUP_TYPE))) {
+            return;
+        }
+
+        OrganizationProvider orgProvider = getProvider(session);
+        checkEnabled(orgProvider, auth);
+
+        OrganizationModel org = orgProvider.getById(config.get(ConfigConstants.ORGANIZATION_ID));
+        auth.orgs().requireManage(org);
+    }
+
     public static boolean canManageOrganizationGroup(KeycloakSession session, GroupModel group) {
         //  if it's not an organization group OR organizations are disabled, we don't need further checks
         if (!isOrganizationGroup(group) || !isEnabled(session)) {
@@ -185,6 +200,21 @@ public class Organizations {
         if (representation.getConfig() != null) {
             representation.getConfig().remove(OrganizationModel.ORGANIZATION_ATTRIBUTE);
         }
+    }
+
+    public static void filterOrganizationLinks(IdentityProviderRepresentation rep, KeycloakSession session, AdminPermissionEvaluator auth) {
+        List<OrganizationIdentityProviderLinkRepresentation> links = rep.getOrganizationLinks();
+        if (links == null || links.isEmpty()) {
+            return;
+        }
+        OrganizationProvider orgProvider = session.getProvider(OrganizationProvider.class);
+        List<OrganizationIdentityProviderLinkRepresentation> filtered = links.stream()
+                .filter(link -> {
+                    OrganizationModel org = orgProvider.getById(link.getOrganizationId());
+                    return org != null && auth.orgs().canView(org);
+                })
+                .collect(Collectors.toList());
+        rep.setOrganizationLinks(filtered.isEmpty() ? null : filtered);
     }
 
     public static Consumer<GroupModel> removeGroup(KeycloakSession session, RealmModel realm) {
@@ -276,41 +306,53 @@ public class Organizations {
     }
 
     public static void validateDomain(String rawDomain) {
+        getDomainValidationError(rawDomain).ifPresent(error -> {
+            throw new ModelValidationException(error);
+        });
+    }
+
+    public static boolean isValidDomain(String rawDomain) {
+        return !isBlank(rawDomain) && getDomainValidationError(rawDomain).isEmpty();
+    }
+
+    private static Optional<String> getDomainValidationError(String rawDomain) {
         if (isBlank(rawDomain)) {
-            return;
+            return Optional.empty();
         }
 
         String domain = rawDomain;
 
         if (rawDomain.contains(WILDCARD_PREFIX)) {
             if (rawDomain.length() == WILDCARD_PREFIX.length()) {
-                throw new ModelValidationException("Wildcard domain must specify a base domain: " + rawDomain);
+                return Optional.of("Wildcard domain must specify a base domain: " + rawDomain);
             }
 
             if (!rawDomain.startsWith(WILDCARD_PREFIX)) {
-                throw new ModelValidationException("Wildcard domain must start with the wildcard");
+                return Optional.of("Wildcard domain must start with the wildcard");
             }
 
             domain = rawDomain.substring(2);
 
             if (domain.contains("*")) {
-                throw new ModelValidationException("Multiple wildcards are not allowed: " + rawDomain);
+                return Optional.of("Multiple wildcards are not allowed: " + rawDomain);
             }
 
             int parts = getDomainPartsSize(domain);
 
             if (parts < MIN_DOMAIN_PARTS) {
-                throw new ModelValidationException("Domain must have at least " + MIN_DOMAIN_PARTS + " parts (e.g. 'example.com'): " + domain);
+                return Optional.of("Domain must have at least " + MIN_DOMAIN_PARTS + " parts (e.g. 'example.com'): " + domain);
             }
 
             if (parts > MAX_DOMAIN_PARTS) {
-                throw new ModelValidationException("Domain has too many parts (max " + MAX_DOMAIN_PARTS + " allowed): " + domain);
+                return Optional.of("Domain has too many parts (max " + MAX_DOMAIN_PARTS + " allowed): " + domain);
             }
         }
 
         if (isBlank(domain) || !EmailValidationUtil.isValidEmail("user@" + domain)) {
-            throw new ModelValidationException("Invalid domain format: " + rawDomain);
+            return Optional.of("Invalid domain format: " + rawDomain);
         }
+
+        return Optional.empty();
     }
 
 

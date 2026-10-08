@@ -65,11 +65,11 @@ import org.keycloak.models.utils.ReadOnlyUserModelDelegate;
 import org.keycloak.organization.InvitationManager;
 import org.keycloak.organization.OrganizationProvider;
 import org.keycloak.organization.utils.Organizations;
+import org.keycloak.organization.validation.OrganizationsValidation;
 import org.keycloak.representations.idm.MembershipType;
 import org.keycloak.storage.StorageId;
 import org.keycloak.storage.UserStoragePrivateUtil;
 import org.keycloak.storage.jpa.entity.FederatedUserGroupMembershipEntity;
-import org.keycloak.utils.ReservedCharValidator;
 import org.keycloak.utils.StringUtil;
 
 import static org.keycloak.models.UserModel.EMAIL;
@@ -78,8 +78,8 @@ import static org.keycloak.models.UserModel.LAST_NAME;
 import static org.keycloak.models.UserModel.USERNAME;
 import static org.keycloak.models.jpa.PaginationUtils.paginateQuery;
 import static org.keycloak.organization.utils.Organizations.isReadOnlyOrganizationMember;
+import static org.keycloak.organization.utils.Organizations.isValidDomain;
 import static org.keycloak.organization.utils.Organizations.resolveByDomain;
-import static org.keycloak.organization.utils.Organizations.validateDomain;
 import static org.keycloak.utils.StreamsUtil.closing;
 
 public class JpaOrganizationProvider implements OrganizationProvider {
@@ -104,13 +104,16 @@ public class JpaOrganizationProvider implements OrganizationProvider {
             throw new ModelValidationException("Name can not be null");
         }
 
-        if (StringUtil.isBlank(alias)) {
-            try {
-                ReservedCharValidator.validateNoSpace(name);
-            } catch (ReservedCharValidator.ReservedCharException e) {
-                throw new ModelValidationException("Name cannot be used as alias: " + e.getMessage());
-            }
+        if (StringUtil.isNullOrEmpty(alias)) {
+            // no alias was provided at all; default to the name. A non-empty but blank (e.g.
+            // whitespace-only) alias is not defaulted here and is rejected below instead.
             alias = name;
+        }
+
+        try {
+            OrganizationsValidation.validateAlias(alias);
+        } catch (OrganizationsValidation.OrganizationValidationException e) {
+            throw new ModelValidationException(e.getMessage());
         }
 
         if (getByName(name) != null) {
@@ -302,7 +305,9 @@ public class JpaOrganizationProvider implements OrganizationProvider {
 
         String emailDomain = domain.toLowerCase();
 
-        validateDomain(emailDomain);
+        if (!isValidDomain(emailDomain)) {
+            return null;
+        }
 
         RealmModel realm = getRealm();
         TypedQuery<OrganizationEntity> query = em.createNamedQuery("getByDomainName", OrganizationEntity.class);
