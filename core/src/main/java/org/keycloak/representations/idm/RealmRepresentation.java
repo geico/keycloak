@@ -101,6 +101,9 @@ public class RealmRepresentation {
     protected Integer maxDeltaTimeSeconds;
     protected Integer failureFactor;
     protected Integer maxSecondaryAuthFailures;
+    protected List<String> bruteForceProtectedUserProperties;
+    protected BruteForceLockPolicy bruteForceLockPolicy;
+    protected Boolean bruteForceIndependentRecoveryAuthnCodes;
     //--- end brute force settings
 
     @Deprecated
@@ -865,6 +868,30 @@ public class RealmRepresentation {
         this.maxSecondaryAuthFailures = maxSecondaryAuthFailures;
     }
 
+    public List<String> getBruteForceProtectedUserProperties() {
+        return bruteForceProtectedUserProperties;
+    }
+
+    public void setBruteForceProtectedUserProperties(List<String> bruteForceProtectedUserProperties) {
+        this.bruteForceProtectedUserProperties = bruteForceProtectedUserProperties;
+    }
+
+    public BruteForceLockPolicy getBruteForceLockPolicy() {
+        return bruteForceLockPolicy;
+    }
+
+    public void setBruteForceLockPolicy(BruteForceLockPolicy bruteForceLockPolicy) {
+        this.bruteForceLockPolicy = bruteForceLockPolicy;
+    }
+
+    public Boolean isBruteForceIndependentRecoveryAuthnCodes() {
+        return bruteForceIndependentRecoveryAuthnCodes;
+    }
+
+    public void setBruteForceIndependentRecoveryAuthnCodes(Boolean bruteForceIndependentRecoveryAuthnCodes) {
+        this.bruteForceIndependentRecoveryAuthnCodes = bruteForceIndependentRecoveryAuthnCodes;
+    }
+
     public Boolean isEventsEnabled() {
         return eventsEnabled;
     }
@@ -1565,5 +1592,14 @@ public class RealmRepresentation {
 
     public enum BruteForceStrategy {
         LINEAR, MULTIPLE;
+    }
+
+    /**
+     * Controls which brute-force counters are allowed to disable login.
+     * {@link #USER} locks only the account that failed. {@link #PROPERTIES} locks
+     * by the selected user properties only.
+     */
+    public enum BruteForceLockPolicy {
+        USER, PROPERTIES;
     }
 }

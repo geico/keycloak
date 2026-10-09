@@ -35,6 +35,9 @@ export default interface RealmRepresentation {
   browserFlow?: string;
   browserSecurityHeaders?: Record<string, any>;
   bruteForceProtected?: boolean;
+  bruteForceProtectedUserProperties?: string[];
+  bruteForceLockPolicy?: "USER" | "PROPERTIES";
+  bruteForceIndependentRecoveryAuthnCodes?: boolean;
   clientAuthenticationFlow?: string;
   clientScopeMappings?: Record<string, any>;
   // ClientScopeRepresentation
