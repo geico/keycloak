@@ -155,6 +155,7 @@ public final class DefaultUserProfile implements UserProfile {
                 for (AttributeChangeListener listener : changeListener) {
                     listener.onChange(name, user, currentValue);
                 }
+                publishAttributeChanged(user, name, currentValue);
             }
 
             // this is a workaround for supporting contexts where the decision to whether attributes should be removed depends on
@@ -187,6 +188,7 @@ public final class DefaultUserProfile implements UserProfile {
                     for (AttributeChangeListener listener : changeListener) {
                         listener.onChange(name, user, currentValue);
                     }
+                    publishAttributeChanged(user, name, currentValue);
                 }
             }
         } catch (ModelException | ReadOnlyException e) {
@@ -197,6 +199,39 @@ public final class DefaultUserProfile implements UserProfile {
         }
 
         return user;
+    }
+
+    private void publishAttributeChanged(UserModel user, String name, List<String> oldValues) {
+        RealmModel realm = session.getContext().getRealm();
+        if (realm == null || oldValues.isEmpty()) {
+            return;
+        }
+        session.getKeycloakSessionFactory().publish(new UserProfileAttributeChangedEvent() {
+            @Override
+            public KeycloakSession getKeycloakSession() {
+                return session;
+            }
+
+            @Override
+            public RealmModel getRealm() {
+                return realm;
+            }
+
+            @Override
+            public UserModel getUser() {
+                return user;
+            }
+
+            @Override
+            public String getAttributeName() {
+                return name;
+            }
+
+            @Override
+            public List<String> getOldValues() {
+                return oldValues;
+            }
+        });
     }
 
     private boolean isIgnoreAttributeUpdate(boolean removeAttributes, List<String> updatedValue, String name) {
@@ -293,7 +328,7 @@ public final class DefaultUserProfile implements UserProfile {
 
         if (realm.isBruteForceProtected() && !attributesRep.containsKey(DISABLED_REASON)) {
             BruteForceProtector protector = session.getProvider(BruteForceProtector.class);
-            boolean lockedOut = protector.isPermanentlyLockedOut(session, realm, user);
+            boolean lockedOut = protector.isPermanentlyLockedOut(session, realm, user, null);
 
             if (lockedOut) {
                 rep.setEnabled(false);

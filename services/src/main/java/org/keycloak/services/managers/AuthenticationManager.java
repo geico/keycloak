@@ -1799,7 +1799,10 @@ public class AuthenticationManager {
             if (attempted != null) {
                 return attempted;
             }
-            return BruteForceUserProperty.findUserByProtectedPropertyValue(session, realm, username);
+            // Property counters are keyed by value, so when several users share the value any of them
+            // records the failure on the same shared counter.
+            return BruteForceUserProperty.findUsersByProtectedPropertyValue(session, realm, username).stream()
+                    .findFirst().orElse(null);
         }
 
         return null;

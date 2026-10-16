@@ -857,7 +857,7 @@ public class IdentityBrokerService implements UserAuthenticationIdentityProvider
             return ErrorPage.error(session, authSession, Response.Status.BAD_REQUEST, Messages.ACCOUNT_DISABLED);
         }
         if (realm.isBruteForceProtected()) {
-            if (session.getProvider(BruteForceProtector.class).isTemporarilyDisabled(session, realm, user)) {
+            if (session.getProvider(BruteForceProtector.class).isTemporarilyDisabled(session, realm, user, null)) {
                 event.error(Errors.USER_TEMPORARILY_DISABLED);
                 return ErrorPage.error(session, authSession, Response.Status.BAD_REQUEST, Messages.ACCOUNT_DISABLED);
             }

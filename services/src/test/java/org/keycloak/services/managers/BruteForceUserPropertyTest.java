@@ -82,11 +82,12 @@ public class BruteForceUserPropertyTest {
         UserModel user = user("user-id", "UserName", "User@Example.com",
                 Map.of("phoneNumber", List.of("+1-555-0100")));
 
-        Assert.assertEquals(List.of("email", "phoneNumber"),
+        Assert.assertEquals(List.of("email", "phoneNumber", "username"),
                 BruteForceUserProperty.getProtectedProperties(realm));
         Assert.assertEquals(List.of(
                 BruteForceUserProperty.propertyKey("email", "user@example.com"),
-                BruteForceUserProperty.propertyKey("phoneNumber", "+1-555-0100")),
+                BruteForceUserProperty.propertyKey("phoneNumber", "+1-555-0100"),
+                BruteForceUserProperty.propertyKey("username", "username")),
                 BruteForceUserProperty.getFailureKeys(realm, user));
     }
 
@@ -157,7 +158,9 @@ public class BruteForceUserPropertyTest {
                 BruteForceUserProperty.getFailureKeysForAttempt(realm, user, "User@Example.com"));
         Assert.assertEquals(List.of(BruteForceUserProperty.propertyKey("department", "sales")),
                 BruteForceUserProperty.getFailureKeysForAttempt(realm, user, "sales"));
-        Assert.assertEquals(List.of(), BruteForceUserProperty.getFailureKeysForAttempt(realm, user, "other"));
+        // An identifier that matches no protected property falls back to the username counter
+        Assert.assertEquals(List.of(BruteForceUserProperty.propertyKey("username", "username")),
+                BruteForceUserProperty.getFailureKeysForAttempt(realm, user, "other"));
     }
 
     @Test
@@ -222,7 +225,7 @@ public class BruteForceUserPropertyTest {
         failureKeys.forEach(key -> failures.put(key, loginFailure(1)));
         KeycloakSession session = session(failures);
 
-        Assert.assertEquals(1, BruteForceUserProperty.getLoginFailures(session, realm, user).count());
+        Assert.assertEquals(2, BruteForceUserProperty.getLoginFailures(session, realm, user).count());
         Assert.assertTrue(BruteForceUserProperty.removeLoginFailures(session, realm, user));
         Assert.assertTrue(failures.isEmpty());
         Assert.assertFalse(BruteForceUserProperty.removeLoginFailures(session, realm, user));
@@ -233,7 +236,60 @@ public class BruteForceUserPropertyTest {
         RealmModel realm = realm("email", "phoneNumber");
         UserModel user = user("user-id", "username", null, Map.of());
 
-        Assert.assertTrue(BruteForceUserProperty.getFailureKeys(realm, user).isEmpty());
+        // Only the username counter remains when no configured property has a value
+        Assert.assertEquals(List.of(BruteForceUserProperty.propertyKey("username", "username")),
+                BruteForceUserProperty.getFailureKeys(realm, user));
+    }
+
+    @Test
+    public void removesCounterOfAnOldValueTheUserNoLongerHas() {
+        RealmModel realm = realm(BruteForceLockPolicy.PROPERTIES, "department");
+        UserModel user = user("user-id", "username", "user@example.com", Map.of("department", List.of("support")));
+        String oldKey = BruteForceUserProperty.propertyKey("department", "sales");
+        String keptKey = BruteForceUserProperty.propertyKey("department", "support");
+        Map<String, UserLoginFailureModel> failures = new HashMap<>();
+        failures.put(oldKey, loginFailure(1));
+        failures.put(keptKey, loginFailure(1));
+        KeycloakSession session = session(failures, List.of(user));
+
+        BruteForceUserProperty.removePropertyLoginFailures(session, realm, user, "department",
+                List.of("sales", "support"));
+
+        // "support" is still held by the user, so only the old "sales" counter goes away
+        Assert.assertEquals(java.util.Set.of(keptKey), failures.keySet());
+    }
+
+    @Test
+    public void unmatchedOrBlankIdentifierFallsBackToUsername() {
+        RealmModel realm = realm(BruteForceLockPolicy.PROPERTIES, "phoneNumber");
+        UserModel user = user("user-id", "UserName", "user@example.com", Map.of());
+        List<String> usernameKey = List.of(BruteForceUserProperty.propertyKey("username", "username"));
+
+        Assert.assertEquals(usernameKey, BruteForceUserProperty.getMatchingPropertyKeys(realm, user, "user@example.com"));
+        Assert.assertEquals(usernameKey, BruteForceUserProperty.getMatchingPropertyKeys(realm, user, null));
+        Assert.assertEquals(usernameKey, BruteForceUserProperty.getMatchingPropertyKeys(realm, user, " "));
+    }
+
+    @Test
+    public void removesPropertyCountersOfARemovedUserUnlessValueIsShared() {
+        RealmModel realm = realm(BruteForceLockPolicy.PROPERTIES, "department");
+        UserModel user = user("user-id", "UserName", "user@example.com", Map.of("department", List.of("sales")));
+        UserModel other = user("other-id", "other", "other@example.com", Map.of("department", List.of("sales")));
+        String usernameKey = BruteForceUserProperty.propertyKey("username", "username");
+        String departmentKey = BruteForceUserProperty.propertyKey("department", "sales");
+        Map<String, UserLoginFailureModel> failures = new HashMap<>();
+        failures.put(usernameKey, loginFailure(1));
+        failures.put(departmentKey, loginFailure(1));
+        failures.put("user-id", loginFailure(1));
+        KeycloakSession session = session(failures, List.of(user, other));
+
+        BruteForceUserProperty.removePropertyLoginFailures(session, realm, user);
+
+        // the shared department counter stays; the unshared username counter is removed
+        Assert.assertEquals(java.util.Set.of(departmentKey, "user-id"), failures.keySet());
+
+        BruteForceUserProperty.removePropertyLoginFailures(session(failures, List.of(user)), realm, user);
+        Assert.assertEquals(java.util.Set.of("user-id"), failures.keySet());
     }
 
     @Test
@@ -326,6 +382,18 @@ public class BruteForceUserPropertyTest {
     }
 
     private static KeycloakSession session(Map<String, UserLoginFailureModel> failures) {
+        return session(failures, List.of());
+    }
+
+    private static KeycloakSession session(Map<String, UserLoginFailureModel> failures, List<UserModel> users) {
+        org.keycloak.models.UserProvider userProvider = (org.keycloak.models.UserProvider) Proxy.newProxyInstance(
+                BruteForceUserPropertyTest.class.getClassLoader(),
+                new Class<?>[] { org.keycloak.models.UserProvider.class },
+                (proxy, method, args) -> switch (method.getName()) {
+                    case "searchForUserByUserAttributeStream" -> users.stream()
+                            .filter(u -> u.getAttributeStream((String) args[1]).anyMatch(args[2]::equals));
+                    default -> throw new UnsupportedOperationException(method.getName());
+                });
         UserLoginFailureProvider provider = (UserLoginFailureProvider) Proxy.newProxyInstance(
                 BruteForceUserPropertyTest.class.getClassLoader(),
                 new Class<?>[] { UserLoginFailureProvider.class },
@@ -340,6 +408,9 @@ public class BruteForceUserPropertyTest {
                 (proxy, method, args) -> {
                     if ("loginFailures".equals(method.getName())) {
                         return provider;
+                    }
+                    if ("users".equals(method.getName())) {
+                        return userProvider;
                     }
                     throw new UnsupportedOperationException(method.getName());
                 });

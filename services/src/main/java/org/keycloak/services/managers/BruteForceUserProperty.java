@@ -79,10 +79,24 @@ public final class BruteForceUserProperty {
         };
     }
 
+    /**
+     * Property counters that match {@code attemptedIdentifier}. When the identifier is blank, or
+     * matches none of the protected properties (for example it was resolved through a property that
+     * is not protected), the user's username counter is used instead so a failed attempt is
+     * never left without a counter.
+     */
     public static List<String> getMatchingPropertyKeys(RealmModel realm, UserModel user, String attemptedIdentifier) {
-        if (attemptedIdentifier == null || attemptedIdentifier.isBlank()) {
-            return List.of();
+        String identifier = attemptedIdentifier == null || attemptedIdentifier.isBlank()
+                ? user.getUsername()
+                : attemptedIdentifier;
+        List<String> keys = matchPropertyKeys(realm, user, identifier);
+        if (keys.isEmpty() && user.getUsername() != null && !user.getUsername().isBlank()) {
+            keys = List.of(propertyKey(UserModel.USERNAME, normalize(UserModel.USERNAME, user.getUsername())));
         }
+        return keys;
+    }
+
+    private static List<String> matchPropertyKeys(RealmModel realm, UserModel user, String attemptedIdentifier) {
         Set<String> keys = new LinkedHashSet<>();
         for (String property : getProtectedProperties(realm)) {
             if (ID.equals(property)) {
@@ -116,27 +130,45 @@ public final class BruteForceUserProperty {
     }
 
     /**
-     * Find a user by a protected custom attribute such as {@code phoneNumber} after username
+     * Find users by a protected custom attribute such as {@code phoneNumber} after username
      * and email lookup missed. Built-in username and email are left to
-     * {@link org.keycloak.models.utils.KeycloakModelUtils#findUserByNameOrEmail}.
+     * {@link org.keycloak.models.utils.KeycloakModelUtils#findUserByNameOrEmail}. Several users
+     * may share a property value; at most two distinct users are returned, which is enough to
+     * tell a unique match from an ambiguous one without scanning every match.
      */
-    public static UserModel findUserByProtectedPropertyValue(KeycloakSession session, RealmModel realm,
+    public static List<UserModel> findUsersByProtectedPropertyValue(KeycloakSession session, RealmModel realm,
             String identifier) {
         if (identifier == null || identifier.isBlank()) {
-            return null;
+            return List.of();
         }
         Map<String, UserModel> users = new LinkedHashMap<>();
         for (String property : realm.getBruteForceProtectedUserProperties()) {
+            if (users.size() > 1) {
+                break;
+            }
             if (ID.equals(property) || UserModel.USERNAME.equals(property) || UserModel.EMAIL.equals(property)) {
                 continue;
             }
-            findUsersByPropertyValue(session, realm, property, identifier)
-                    .forEach(found -> users.putIfAbsent(found.getId(), found));
+            try (Stream<UserModel> found = findUsersByPropertyValue(session, realm, property, identifier)) {
+                found.limit(2).forEach(user -> users.putIfAbsent(user.getId(), user));
+            }
         }
+        return List.copyOf(users.values());
+    }
+
+    /**
+     * Find the single user that has a protected custom attribute value.
+     *
+     * @throws ModelDuplicateException when several users share the value, as the login cannot
+     *         tell which account is being authenticated
+     */
+    public static UserModel findUserByProtectedPropertyValue(KeycloakSession session, RealmModel realm,
+            String identifier) {
+        List<UserModel> users = findUsersByProtectedPropertyValue(session, realm, identifier);
         if (users.size() > 1) {
             throw new ModelDuplicateException("Multiple users match protected property value");
         }
-        return users.isEmpty() ? null : users.values().iterator().next();
+        return users.isEmpty() ? null : users.get(0);
     }
 
     public static boolean isPermanentlyLocked(RealmModel realm, UserLoginFailureModel model) {
@@ -153,6 +185,10 @@ public final class BruteForceUserProperty {
                 properties.addAll(realm.getBruteForceProtectedUserProperties());
                 if (properties.isEmpty()) {
                     properties.add(ID);
+                } else if (!properties.contains(ID)) {
+                    // The username counter is the fallback for attempts that match no configured
+                    // property, so a narrow property list cannot leave a failed attempt uncounted.
+                    properties.add(UserModel.USERNAME);
                 }
             }
             case USER -> properties.add(ID);
@@ -184,6 +220,64 @@ public final class BruteForceUserProperty {
             }
         }
         return removed;
+    }
+
+    /**
+     * Removes the property counters of a user that is being deleted. Counters are keyed by the
+     * property value, not the user, so a counter is kept while another user still has the same
+     * value. Call before the user is removed so its values can still be read.
+     */
+    public static void removePropertyLoginFailures(KeycloakSession session, RealmModel realm, UserModel user) {
+        for (String property : getProtectedProperties(realm)) {
+            if (!ID.equals(property)) {
+                removeUnusedPropertyCounters(session, realm, user, property, values(user, property).toList());
+            }
+        }
+    }
+
+    /**
+     * Removes the counters of {@code oldValues} of a protected property that a user no longer has,
+     * for example after an email change. Without this the counter would linger, and a permanent
+     * lock on it could never be cleared because unlocking only visits a user's current values.
+     * A counter is kept while the user or another user still has the value.
+     */
+    public static void removePropertyLoginFailures(KeycloakSession session, RealmModel realm, UserModel user,
+            String property, List<String> oldValues) {
+        if (ID.equals(property) || !getProtectedProperties(realm).contains(property)) {
+            return;
+        }
+        Set<String> current = values(user, property)
+                .filter(v -> v != null && !v.isBlank())
+                .map(v -> normalize(property, v))
+                .collect(java.util.stream.Collectors.toSet());
+        removeUnusedPropertyCounters(session, realm, user, property, oldValues.stream()
+                .filter(v -> v != null && !v.isBlank() && !current.contains(normalize(property, v))).toList());
+    }
+
+    private static void removeUnusedPropertyCounters(KeycloakSession session, RealmModel realm, UserModel user,
+            String property, List<String> oldValues) {
+        for (String value : oldValues.stream().filter(v -> v != null && !v.isBlank()).distinct().toList()) {
+            if (isValueUsedByAnotherUser(session, realm, user, property, value)) {
+                continue;
+            }
+            String failureKey = propertyKey(property, normalize(property, value));
+            if (session.loginFailures().getUserLoginFailure(realm, failureKey) != null) {
+                session.loginFailures().removeUserLoginFailure(realm, failureKey);
+            }
+        }
+    }
+
+    private static boolean isValueUsedByAnotherUser(KeycloakSession session, RealmModel realm, UserModel user,
+            String property, String value) {
+        Stream<UserModel> others = switch (property) {
+            case UserModel.USERNAME -> Stream.empty();
+            case UserModel.EMAIL, UserModel.FIRST_NAME, UserModel.LAST_NAME -> session.users()
+                    .searchForUserStream(realm, Map.of(property, value, UserModel.EXACT, Boolean.TRUE.toString()));
+            default -> findUsersByPropertyValue(session, realm, property, value);
+        };
+        try (others) {
+            return others.anyMatch(other -> !other.getId().equals(user.getId()));
+        }
     }
 
     public static Stream<UserLoginFailureModel> getLoginFailures(KeycloakSession session, RealmModel realm,
