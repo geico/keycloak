@@ -170,6 +170,10 @@ public class InfinispanOrganizationProvider implements OrganizationProvider {
 
     @Override
     public OrganizationModel getByDomainName(String domainName) {
+        if (domainName == null) {
+            return null;
+        }
+
         if (realmCache == null) {
             return getDelegate().getByDomainName(domainName);
         }
@@ -218,6 +222,17 @@ public class InfinispanOrganizationProvider implements OrganizationProvider {
     @Override
     public long count(Map<String, String> attributes) {
         return getDelegate().count(attributes);
+    }
+
+    @Override
+    public Stream<OrganizationModel> getByIdentityProvider(IdentityProviderModel identityProvider, String search, Boolean exact, Integer first, Integer max) {
+        // Return cache delegates to ensure cache invalidation during write operations
+        return getCacheDelegates(getDelegate().getByIdentityProvider(identityProvider, search, exact, first, max));
+    }
+
+    @Override
+    public long countByIdentityProvider(IdentityProviderModel identityProvider, String search, Boolean exact) {
+        return getDelegate().countByIdentityProvider(identityProvider, search, exact);
     }
 
     @Override

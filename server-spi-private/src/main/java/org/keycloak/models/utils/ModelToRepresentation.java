@@ -28,6 +28,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -845,6 +846,18 @@ public class ModelToRepresentation {
     }
 
     public static UserSessionRepresentation toRepresentation(UserSessionModel session) {
+        return toRepresentation(session, client -> true);
+    }
+
+    /**
+     * Converts the specified {@link UserSessionModel} into a {@link UserSessionRepresentation}, listing only the clients
+     * accepted by {@code clientFilter}.
+     *
+     * @param session the model to be converted.
+     * @param clientFilter decides which of the session's clients are included in the representation.
+     * @return a reference to the constructed representation.
+     */
+    public static UserSessionRepresentation toRepresentation(UserSessionModel session, Predicate<ClientModel> clientFilter) {
         UserSessionRepresentation rep = new UserSessionRepresentation();
         rep.setId(session.getId());
         rep.setStart(Time.toMillis(session.getStarted()));
@@ -855,7 +868,9 @@ public class ModelToRepresentation {
         rep.setRememberMe(session.isRememberMe());
         for (AuthenticatedClientSessionModel clientSession : session.getAuthenticatedClientSessions().values()) {
             ClientModel client = clientSession.getClient();
-            rep.getClients().put(client.getId(), client.getClientId());
+            if (clientFilter.test(client)) {
+                rep.getClients().put(client.getId(), client.getClientId());
+            }
         }
         rep.setTransientUser(LightweightUserAdapter.isLightweightUser(session.getUser().getId()));
         return rep;
@@ -994,8 +1009,7 @@ public class ModelToRepresentation {
         providerRep.setStoreToken(identityProviderModel.isStoreToken());
         providerRep.setTrustEmail(identityProviderModel.isTrustEmail());
         providerRep.setAuthenticateByDefault(identityProviderModel.isAuthenticateByDefault());
-        Map<String, String> config = new HashMap<>(identityProviderModel.getConfig());
-        providerRep.setConfig(config);
+        providerRep.setConfig(new HashMap<>(identityProviderModel.getConfig()));
         providerRep.setAddReadTokenRoleOnCreate(identityProviderModel.isAddReadTokenRoleOnCreate());
 
         String firstBrokerLoginFlowId = identityProviderModel.getFirstBrokerLoginFlowId();
@@ -1540,8 +1554,8 @@ public class ModelToRepresentation {
         rep.setEnabled(model.isEnabled());
         rep.setRedirectUrl(model.getRedirectUrl());
         rep.setDescription(model.getDescription());
-        model.getDomains().filter(Objects::nonNull).map(ModelToRepresentation::toRepresentation)
-                .forEach(rep::addDomain);
+        rep.setDomains(model.getDomains().filter(Objects::nonNull).map(ModelToRepresentation::toRepresentation)
+                .collect(Collectors.toSet()));
         return rep;
     }
 
