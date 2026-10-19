@@ -96,12 +96,35 @@ public class DefaultBruteForceProtector implements BruteForceProtector {
                         : new ArrayList<>(BruteForceUserProperty.getFailureKeysForAttempt(realm, user, attemptedIdentifier));
         boolean otpAttempt = user != null && categories != null && categories.contains(OTP_CATEGORY)
                 && !BruteForceRecoveryCode.isAttempt(realm, categories);
-        // OTP secondary-auth lockout is account-wide even when password is tracked per identifier.
-        if (otpAttempt && !failureKeys.contains(user.getId())) {
-            failureKeys.add(user.getId());
-        }
         for (String failureKey : failureKeys) {
             failure(session, realm, user, failureKey, remoteAddr, failureTime, categories);
+        }
+        // OTP secondary-auth lockout is account-wide even when password failures are tracked per
+        // identifier. When the user id counter is not already part of this attempt, only its secondary
+        // counter is advanced, so OTP failures never feed the primary failure or temporary lockout logic.
+        if (otpAttempt && !failureKeys.contains(user.getId())) {
+            secondaryAuthFailure(session, realm, user, remoteAddr, failureTime);
+        }
+    }
+
+    private void secondaryAuthFailure(KeycloakSession session, RealmModel realm, UserModel user, String remoteAddr,
+            long failureTime) {
+        UserLoginFailureModel userLoginFailure = getUserFailureModel(session, realm, user.getId());
+        if (userLoginFailure == null) {
+            userLoginFailure = session.loginFailures().addUserLoginFailure(realm, user.getId());
+        }
+        userLoginFailure.setLastIPFailure(remoteAddr);
+        userLoginFailure.setLastFailure(failureTime);
+        incrementSecondaryAuthFailures(session, realm, user, userLoginFailure);
+    }
+
+    private void incrementSecondaryAuthFailures(KeycloakSession session, RealmModel realm, UserModel user,
+            UserLoginFailureModel userLoginFailure) {
+        int maxSecondaryAuthFailures = realm.getMaxSecondaryAuthFailures();
+        userLoginFailure.incrementSecondaryAuthFailures();
+        logger.debugv("new num secondaryAuthFailures: {0}", Integer.valueOf(userLoginFailure.getNumSecondaryAuthFailures()));
+        if (maxSecondaryAuthFailures > 0 && userLoginFailure.getNumSecondaryAuthFailures() > maxSecondaryAuthFailures) {
+            permanentUserLockOut(session, realm, user, userLoginFailure);
         }
     }
 
@@ -170,23 +193,15 @@ public class DefaultBruteForceProtector implements BruteForceProtector {
                 // Converting to int is workaround for the fact that "failedLoginNotBefore" is int in the model. Should be fine as user would be considered temporarily disabled with Integer.MAX_VALUE
                 int notBeforeInt = notBefore > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) notBefore;
                 userLoginFailure.setFailedLoginNotBefore(notBeforeInt);
-                if (disablesAccount) {
-                    sendEvent(session, realm, user != null ? user.getId() : failureKey, userLoginFailure,
-                            EventType.USER_DISABLED_BY_TEMPORARY_LOCKOUT);
-                }
+                sendEvent(session, realm, user != null ? user.getId() : failureKey, userLoginFailure,
+                        EventType.USER_DISABLED_BY_TEMPORARY_LOCKOUT);
             }
         }
 
-        if (categories != null && categories.contains(OTP_CATEGORY)) {
-            int maxSecondaryAuthFailures = realm.getMaxSecondaryAuthFailures();
-            boolean lockoutEnabled = maxSecondaryAuthFailures > 0;
-            userLoginFailure.incrementSecondaryAuthFailures();
-            logger.debugv("new num secondaryAuthFailures: {0}", Integer.valueOf(userLoginFailure.getNumSecondaryAuthFailures()));
-            // OTP lockout disables the account even when this attempt was keyed by an identifier
-            // or recovery counter, so authenticator-app grinding cannot hop identifiers.
-            if (lockoutEnabled && userLoginFailure.getNumSecondaryAuthFailures() > maxSecondaryAuthFailures) {
-                permanentUserLockOut(session, realm, user, userLoginFailure);
-            }
+        // Property and recovery counters can be shared or independent of the account, so only the
+        // user id counter takes part in the account-wide OTP lockout.
+        if (disablesAccount && categories != null && categories.contains(OTP_CATEGORY)) {
+            incrementSecondaryAuthFailures(session, realm, user, userLoginFailure);
         }
 
         if(!realm.isPermanentLockout() || !disablesAccount) {
