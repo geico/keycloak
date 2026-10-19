@@ -67,6 +67,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import static org.keycloak.OAuth2Constants.ACCESS_TOKEN_TYPE;
+import static org.keycloak.representations.IDToken.ACT;
 import static org.keycloak.tests.oauth.tokenexchange.DelegationAssertions.assertActPresent;
 import static org.keycloak.tests.oauth.tokenexchange.DelegationAssertions.assertMayActNotPresent;
 import static org.keycloak.tests.oauth.tokenexchange.DelegationAssertions.assertMayActPresent;
@@ -298,6 +299,47 @@ public class ClientDelegationTest {
 
     @Test
     public void clientIdMismatchOnExchange() {
+        replaceMayActClientIdMapper("wrong-client", "String");
+
+        AccessTokenResponse res = loginWithDelegation(AGENT_DELEGATION_SCOPE);
+        assertScopeContains(res.getScope(), AGENT_DELEGATION_SCOPE);
+
+        // actor token is from agent-app (azp = "agent-app") but may_act.client_id is "wrong-client"
+        String actorToken = getActorToken();
+        ExpectedActor clientActor = new ExpectedActor(Details.ACTOR_TYPE_CLIENT, AGENT_CLIENT_ID, getServiceAccountUserId());
+        assertTokenExchangeError(AGENT_CLIENT_ID, AGENT_CLIENT_SECRET, res.getAccessToken(), actorToken,
+                AGENT_CLIENT_ID, "Actor token client does not match the client_id in the may_act claim", clientActor);
+
+        logout(res.getRefreshToken());
+    }
+
+    @Test
+    public void nonStringClientIdOnExchange() {
+        // a non-string client_id is a malformed may_act claim and must not silently skip the client binding checks
+        replaceMayActClientIdMapper("12345", "int");
+
+        AccessTokenResponse res = loginWithDelegation(AGENT_DELEGATION_SCOPE);
+        assertScopeContains(res.getScope(), AGENT_DELEGATION_SCOPE);
+
+        String actorToken = getActorToken();
+        ExpectedActor clientActor = new ExpectedActor(Details.ACTOR_TYPE_CLIENT, AGENT_CLIENT_ID, getServiceAccountUserId());
+
+        // the client named in the claim cannot complete the exchange...
+        assertTokenExchangeError(AGENT_CLIENT_ID, AGENT_CLIENT_SECRET, res.getAccessToken(), actorToken,
+                AGENT_CLIENT_ID, "Invalid may_act claim in the subject_token", clientActor);
+
+        // ... and neither can any other client
+        assertTokenExchangeError(TEST_CLIENT_ID, TEST_CLIENT_SECRET, res.getAccessToken(), actorToken,
+                TEST_CLIENT_ID, "Invalid may_act claim in the subject_token", clientActor);
+
+        logout(res.getRefreshToken());
+    }
+
+    /**
+     * Replaces the built-in {@code may_act.client_id} mapper of the delegation client scope with a hardcoded
+     * claim mapper producing the given value and JSON type.
+     */
+    private void replaceMayActClientIdMapper(String claimValue, String jsonType) {
         String clientDelegationScopeId = findClientDelegationScopeId();
 
         // Remove the original client_id mapper so the hardcoded one takes effect
@@ -311,37 +353,25 @@ public class ClientDelegationTest {
         realm.cleanup().add(r -> r.clientScopes().get(clientDelegationScopeId)
                 .getProtocolMappers().createMapper(originalMapper));
 
-        // Add a hardcoded claim mapper that sets may_act.client_id to a wrong value
-        ProtocolMapperRepresentation wrongClientIdMapper = new ProtocolMapperRepresentation();
-        wrongClientIdMapper.setName("wrong-client-id-mapper");
-        wrongClientIdMapper.setProtocol("openid-connect");
-        wrongClientIdMapper.setProtocolMapper("oidc-hardcoded-claim-mapper");
+        ProtocolMapperRepresentation clientIdMapper = new ProtocolMapperRepresentation();
+        clientIdMapper.setName("hardcoded-client-id-mapper");
+        clientIdMapper.setProtocol("openid-connect");
+        clientIdMapper.setProtocolMapper("oidc-hardcoded-claim-mapper");
         Map<String, String> config = new HashMap<>();
         config.put(OIDCAttributeMapperHelper.TOKEN_CLAIM_NAME, "may_act.client_id");
-        config.put(HardcodedClaim.CLAIM_VALUE, "wrong-client");
-        config.put(OIDCAttributeMapperHelper.JSON_TYPE, "String");
+        config.put(HardcodedClaim.CLAIM_VALUE, claimValue);
+        config.put(OIDCAttributeMapperHelper.JSON_TYPE, jsonType);
         config.put(OIDCAttributeMapperHelper.INCLUDE_IN_ACCESS_TOKEN, Boolean.TRUE.toString());
-        wrongClientIdMapper.setConfig(config);
+        clientIdMapper.setConfig(config);
 
         String mapperId;
         try (var response = realm.admin().clientScopes().get(clientDelegationScopeId)
-                .getProtocolMappers().createMapper(wrongClientIdMapper)) {
+                .getProtocolMappers().createMapper(clientIdMapper)) {
             Assertions.assertEquals(201, response.getStatus(), "Mapper creation should succeed");
             mapperId = ApiUtil.getCreatedId(response);
         }
         realm.cleanup().add(r -> r.clientScopes().get(clientDelegationScopeId)
                 .getProtocolMappers().delete(mapperId));
-
-        AccessTokenResponse res = loginWithDelegation(AGENT_DELEGATION_SCOPE);
-        assertScopeContains(res.getScope(), AGENT_DELEGATION_SCOPE);
-
-        // actor token is from agent-app (azp = "agent-app") but may_act.client_id is "wrong-client"
-        String actorToken = getActorToken();
-        ExpectedActor clientActor = new ExpectedActor(Details.ACTOR_TYPE_CLIENT, AGENT_CLIENT_ID, getServiceAccountUserId());
-        assertTokenExchangeError(AGENT_CLIENT_ID, AGENT_CLIENT_SECRET, res.getAccessToken(), actorToken,
-                AGENT_CLIENT_ID, "Actor token client does not match the client_id in the may_act claim", clientActor);
-
-        logout(res.getRefreshToken());
     }
 
     @Test
@@ -556,7 +586,11 @@ public class ClientDelegationTest {
         Assertions.assertTrue(introspectRes.isSuccess());
         try {
             TokenMetadataRepresentation rep = introspectRes.asTokenMetadata();
+            Assertions.assertTrue(rep.isActive());
             Assertions.assertEquals(USERNAME, rep.getUserName());
+            assertActPresent(rep, expectedActorId, AGENT_CLIENT_ID);
+            Assertions.assertEquals(teToken.getOtherClaims().get(ACT), rep.getOtherClaims().get(ACT),
+                    "Introspection should preserve the complete act claim");
         } catch (IOException e) {
             Assertions.fail(e);
         }

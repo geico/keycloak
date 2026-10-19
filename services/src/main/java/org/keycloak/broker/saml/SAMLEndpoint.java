@@ -74,6 +74,7 @@ import org.keycloak.events.Details;
 import org.keycloak.events.Errors;
 import org.keycloak.events.EventBuilder;
 import org.keycloak.events.EventType;
+import org.keycloak.forms.login.LoginFormsProvider;
 import org.keycloak.keys.PublicKeyLoader;
 import org.keycloak.keys.PublicKeyStorageProvider;
 import org.keycloak.keys.PublicKeyStorageUtils;
@@ -392,10 +393,19 @@ public class SAMLEndpoint {
                 }
             }
 
+            String logoutServiceUrl = config.getSingleLogoutServiceUrl();
+            if (StringUtil.isBlank(logoutServiceUrl)) {
+                logger.debugf("IdP '%s' has no Single Logout Service URL; skipping LogoutResponse", config.getAlias());
+                event.success();
+                return session.getProvider(LoginFormsProvider.class)
+                        .setSuccess(Messages.SUCCESS_LOGOUT)
+                        .createInfoPage();
+            }
+
             String issuerURL = getEntityId(session.getContext().getUri(), realm);
             SAML2LogoutResponseBuilder builder = new SAML2LogoutResponseBuilder();
             builder.logoutRequestID(request.getID());
-            builder.destination(config.getSingleLogoutServiceUrl());
+            builder.destination(logoutServiceUrl);
             builder.issuer(issuerURL);
             JaxrsSAML2BindingBuilder binding = new JaxrsSAML2BindingBuilder(session)
                         .relayState(relayState);
@@ -412,9 +422,9 @@ public class SAMLEndpoint {
             }
             try {
                 if (postBinding) {
-                    return binding.postBinding(builder.buildDocument()).response(config.getSingleLogoutServiceUrl());
+                    return binding.postBinding(builder.buildDocument()).response(logoutServiceUrl);
                 } else {
-                    return binding.redirectBinding(builder.buildDocument()).response(config.getSingleLogoutServiceUrl());
+                    return binding.redirectBinding(builder.buildDocument()).response(logoutServiceUrl);
                 }
             } catch (ConfigurationException e) {
                 throw new RuntimeException(e);
@@ -1073,34 +1083,38 @@ public class SAMLEndpoint {
     }
 
     private boolean validateSubjectConfirmationData(ResponseType responseType, String expectedRequestId) {
-        // If present, Assertion > Subject > Confirmation > SubjectConfirmationData > InResponseTo must also be validated
+        // Assertion > Subject > Confirmation (Bearer) > SubjectConfirmationData is mandatory and must always be
+        // validated. Multiple Bearer confirmations are alternatives per the SAML 2.0 spec, so the assertion is
+        // valid if any one of them passes validation.
         if (responseType.getAssertions().isEmpty())
             return true;
 
         AssertionType assertion = responseType.getAssertions().get(0).getAssertion();
         SubjectType subjectElement = assertion.getSubject();
-        if (subjectElement != null) {
-            if (subjectElement.getConfirmation() != null && !subjectElement.getConfirmation().isEmpty()) {
-                SubjectConfirmationType subjectConfirmationElement = subjectElement.getConfirmation().stream()
+
+        List<SubjectConfirmationType> bearerConfirmations = subjectElement == null
+                ? Collections.emptyList()
+                : subjectElement.getConfirmation().stream()
                         .filter(c -> JBossSAMLURIConstants.SUBJECT_CONFIRMATION_BEARER.get().equals(c.getMethod()))
-                        .findFirst().orElse(null);
+                        .collect(Collectors.toList());
 
-                if (subjectConfirmationElement != null) {
-                    SubjectConfirmationDataType subjectConfirmationDataElement = subjectConfirmationElement.getSubjectConfirmationData();
-                    SubjectConfirmationDataValidator.Builder scdvb = new SubjectConfirmationDataValidator.Builder(assertion.getID(), subjectConfirmationDataElement, destinationValidator)
-                            .inResponseTo(expectedRequestId)
-                            .clockSkewInMillis(1000 * config.getAllowedClockSkew());
-                    if (responseType.getDestination() != null) {
-                        scdvb.allowedRecipient(responseType.getDestination());
-                    }
-
-                    if (!scdvb.build().isValid()) {
-                        return false;
-                    }
-                }
-            }
+        if (bearerConfirmations.isEmpty()) {
+            return isSubjectConfirmationDataValid(assertion, null, responseType, expectedRequestId);
         }
 
-        return true;
+        return bearerConfirmations.stream().anyMatch(subjectConfirmationElement ->
+                isSubjectConfirmationDataValid(assertion, subjectConfirmationElement.getSubjectConfirmationData(), responseType, expectedRequestId));
+    }
+
+    private boolean isSubjectConfirmationDataValid(AssertionType assertion, SubjectConfirmationDataType subjectConfirmationDataElement,
+            ResponseType responseType, String expectedRequestId) {
+        SubjectConfirmationDataValidator.Builder scdvb = new SubjectConfirmationDataValidator.Builder(assertion.getID(), subjectConfirmationDataElement, destinationValidator)
+                .inResponseTo(expectedRequestId)
+                .clockSkewInMillis(1000 * config.getAllowedClockSkew());
+        if (responseType.getDestination() != null) {
+            scdvb.allowedRecipient(responseType.getDestination());
+        }
+
+        return scdvb.build().isValid();
     }
 }

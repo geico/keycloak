@@ -1,12 +1,9 @@
 [[_parameterized_client_scopes]]
 == Parameterized client scopes
 
-[IMPORTANT]
-====
-This feature is currently experimental. Do not use it in production. Backward compatibility is not guaranteed, and future updates may introduce breaking changes.
-
-To enable, start the server with `--features=parameterized-scopes`.
-====
+:tech_feature_name: Parameterized scopes
+:tech_feature_id: parameterized-scopes
+include::../../topics/templates/techpreview.adoc[]
 
 {project_name} supports parameterized client scopes, which allow clients to pass a parameter value along with the scope name in the OAuth 2.0 authorization request. A parameterized scope uses the format `scopeName:parameterValue`, where the colon (`:`) separates the scope name from its parameter.
 
@@ -127,7 +124,7 @@ When a client requests multiple parameter values for a non-repeatable scope, {pr
 
 Parameterized Scope Parameter:: Maps the raw parameter value directly to a token claim. For example, if a scope named `project` is requested as `project:backend-api`, this mapper can place `backend-api` into a claim such as `project`. Available for all parameterized scope types.
 
-Parameterized Scope User Property:: Resolves a user from the parameter value (username) and maps a user attribute or built-in property (such as `email`, `firstName`, or `id`) to a token claim. For example, a `share-with` scope requested as `share-with:alice` can map Alice's email to a `shared_user_email` claim.
+Parameterized Scope User Property:: Resolves a user from the parameter value (username, or email when the realm has *Login with email* enabled) and maps a user attribute or built-in property (such as `email`, `firstName`, or `id`) to a token claim. For example, a `share-with` scope requested as `share-with:alice` can map Alice's email to a `shared_user_email` claim.
 +
 This mapper is applicable when the parameter type is `username` or `user-delegation`. Access control depends on the type:
 +
