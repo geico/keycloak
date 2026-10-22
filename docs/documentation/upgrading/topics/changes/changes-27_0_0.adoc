@@ -4,6 +4,27 @@
 Breaking changes are identified as those that might require changes for existing users to their configurations or applications.
 In minor or patch releases, {project_name} will only introduce breaking changes to fix bugs.
 
+=== Realm-level default client scopes require `manage-realm`
+// https://github.com/keycloak/keycloak/issues/50588
+
+Changing the realm-level default and optional client scopes through the Admin REST API endpoints `default-default-client-scopes/{clientScopeId}` and `default-optional-client-scopes/{clientScopeId}` now requires the `manage-realm` role.
+Previously `manage-clients` was sufficient, even though these lists determine which client scopes every newly created client in the realm receives.
+Administrators who hold only `manage-clients` can still create, update, and delete individual client scopes, and can still read the realm-level lists; they can no longer change which of them are realm defaults.
+If you have automation that manages realm default client scopes with a `manage-clients` account, grant it `manage-realm` or run it with an account that already has it.
+
+=== Deleting required client scopes
+// https://github.com/keycloak/keycloak/issues/51248
+
+Deleting a required client scope now retains the requirement.
+The policy and any enclosing aggregated policies deny access while the scope is missing, regardless of positive or negative logic.
+A warning identifies affected policies; an authorization administrator can remove or replace the missing reference to resume normal evaluation.
+Requirements removed before upgrading cannot be restored automatically.
+
+The Java authorization SPI adds `Decision.Effect.INVALID` for invalid policy configuration.
+The partial-evaluation SPI adds the equivalent `Outcome.INVALID`.
+Custom extensions must handle these new enum values: aggregated policies propagate them unchanged, while permission decision strategies count them as a denial.
+Admin REST API evaluation responses continue to report only `PERMIT` or `DENY`.
+
 === Realm client session statistics respect client visibility
 // https://github.com/keycloak/keycloak/issues/50917
 
@@ -121,6 +142,34 @@ Updates that change other settings, or that use a `${vault.<key>}` expression as
 
 Custom identity providers whose secret is sent to a destination derived from provider-specific configuration can take part in this check by overriding `IdentityProviderModel#canReuseMaskedClientSecret` in the model returned by `IdentityProviderFactory#createConfig()`.
 Providers extending `OAuth2IdentityProviderConfig` can instead override `getClientSecretDestinationConfigKeys()` and `isClientSecretDestinationChanged()`.
+
+=== CIBA requires client authentication (CVE-2026-109082)
+// https://github.com/keycloak/keycloak/issues/53937
+
+The Client Initiated Backchannel Authentication (CIBA) grant is now rejected for public clients, as required by the https://openid.net/specs/openid-client-initiated-backchannel-authentication-core-1_0.html#rfc.section.7.1[CIBA specification], which mandates client authentication on both the backchannel authentication endpoint and the token endpoint.
+Previously, a public client with the CIBA grant enabled could complete the flow without authenticating and obtain tokens for the approving user.
+
+=== Service account user endpoint removed from Admin REST API
+// https://github.com/keycloak/keycloak/issues/54047
+
+The `GET /admin/realms/\{realm}/clients/\{id}/service-account-user` endpoint has been removed.
+The service account user ID is now available directly on the client representation as the `serviceAccountUserId` field, which is populated when `serviceAccountsEnabled` is `true`.
+This field is read-only and managed by the server.
+
+If you previously called this endpoint to obtain the service account user ID for role mapping or other operations, retrieve the client representation instead:
+
+[source,java]
+----
+// Before:
+UserRepresentation sa = clientResource.getServiceAccountUser();
+String saUserId = sa.getId();
+
+// After:
+String saUserId = clientResource.toRepresentation().getServiceAccountUserId();
+----
+
+The `getServiceAccountUser()` method has also been removed from the Java and JavaScript admin client libraries.
+If you need the full user representation for the service account, use the user ID from the client representation to fetch it via the Users API.
 
 // ------------------------ Notable changes ------------------------ //
 == Notable changes
