@@ -1776,7 +1776,8 @@ public class AuthenticationManager {
                         user,
                         session.getContext().getConnection(),
                         session.getContext().getHttpRequest().getUri(),
-                        Set.copyOf(AuthenticatorUtil.getAuthnCredentials(authSession))
+                        Set.copyOf(AuthenticatorUtil.getAuthnCredentials(authSession)),
+                        authSession.getAuthNote(AbstractUsernameFormAuthenticator.ATTEMPTED_USERNAME)
                 );
             }
         }
@@ -1795,7 +1796,14 @@ public class AuthenticationManager {
 
         String username = authenticationSession.getAuthNote(AbstractUsernameFormAuthenticator.ATTEMPTED_USERNAME);
         if (username != null) {
-            return KeycloakModelUtils.findUserByNameOrEmail(session, realm, username);
+            UserModel attempted = KeycloakModelUtils.findUserByNameOrEmail(session, realm, username);
+            if (attempted != null) {
+                return attempted;
+            }
+            // Property counters are keyed by value, so when several users share the value any of them
+            // records the failure on the same shared counter.
+            return BruteForceUserProperty.findUsersByProtectedPropertyValue(session, realm, username).stream()
+                    .findFirst().orElse(null);
         }
 
         return null;
