@@ -26,8 +26,10 @@ import org.keycloak.Config;
 import org.keycloak.common.Profile;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.KeycloakSessionFactory;
+import org.keycloak.models.UserModel;
 import org.keycloak.provider.ProviderConfigProperty;
 import org.keycloak.provider.ProviderConfigurationBuilder;
+import org.keycloak.userprofile.UserProfileAttributeChangedEvent;
 
 /**
  * @author <a href="mailto:bill@burkecentral.com">Bill Burke</a>
@@ -52,6 +54,17 @@ public class DefaultBruteForceProtectorFactory implements BruteForceProtectorFac
 
     @Override
     public void postInit(KeycloakSessionFactory factory) {
+        factory.register(event -> {
+            if (event instanceof UserModel.UserPreRemovedEvent removed
+                    && removed.getRealm().isBruteForceProtected()) {
+                BruteForceUserProperty.removePropertyLoginFailures(removed.getKeycloakSession(), removed.getRealm(),
+                        removed.getUser());
+            } else if (event instanceof UserProfileAttributeChangedEvent changed
+                    && changed.getRealm().isBruteForceProtected()) {
+                BruteForceUserProperty.removePropertyLoginFailures(changed.getKeycloakSession(), changed.getRealm(),
+                        changed.getUser(), changed.getAttributeName(), changed.getOldValues());
+            }
+        });
         if (Profile.isFeatureEnabled(Profile.Feature.LOGIN_FAILURES_V1)) {
             protector = allowConcurrentRequests ? new DefaultBruteForceProtector(factory) : new DefaultBlockingBruteForceProtector(factory);
         }

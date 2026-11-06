@@ -26,6 +26,39 @@ To enable this protection:
 .Brute force detection
 image:images/brute-force.png[]
 
+==== Lock by user properties
+By default, brute force detection counts failures per user id and locks only that account (*This user only*). You can also count failures against the identifier the user submitted -- built-in fields such as `username` and `email`, or any custom user profile attribute.
+
+A failed login increments:
+
+* the per-user counter, when the lock policy is *This user only*
+* only the selected property whose current value matches the submitted identifier, when the lock policy is *Shared properties only*
+
+*Max login failures* is the threshold for the per-user counter or each identifier counter. Reaching an identifier threshold blocks only that identifier, so a locked email does not prevent login with a phone number or username.
+
+Users that share a property value (for example the same email) share that identifier counter. The existing user unlock action clears all current identifier counters for that user.
+
+*Lock policy* chooses which counters increment:
+
+* *This user only* -- increment the per-user counter. Selected properties are ignored.
+* *Shared properties only* -- increment the submitted identifier. The per-user counter is used only if `id` is selected or the list is empty.
+
+[WARNING]
+====
+Use shared properties only when locking every user with the same value is intended. Include the identifiers users actually type (for example `username` or `email`); a custom attribute is incremented only when the login form submits that value.
+
+Property counters belong to the property value, not to an individual user. Changing a user's property does not delete the counter for the old value, and the user inherits any existing counter for the new value. Select `id` instead when protection must follow the stable user id.
+====
+
+Locking by user property does not create separate counters for authentication methods or delivery channels. For example, email OTP and SMS OTP attempts are not counted independently.
+
+To configure this:
+
+. Enable a brute force mode other than *Disabled*.
+. Choose a *Lock policy*.
+. If the policy is not *This user only*, select one or more property ids in *Lock by user properties*.
+. Click *Save*.
+
 ==== Lockout permanently
 {project_name} disables a user account (blocking log in attempts) until an administrator re-enables it.
 
