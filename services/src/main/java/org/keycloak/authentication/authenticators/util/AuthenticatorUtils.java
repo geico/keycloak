@@ -34,6 +34,7 @@ import org.keycloak.models.PasswordPolicy;
 import org.keycloak.models.RealmModel;
 import org.keycloak.models.UserModel;
 import org.keycloak.models.UserSessionModel;
+import org.keycloak.services.managers.AuthenticationManager;
 import org.keycloak.services.managers.BruteForceProtector;
 import org.keycloak.services.validation.Validation;
 import org.keycloak.sessions.AuthenticationSessionModel;
@@ -42,6 +43,7 @@ import org.keycloak.util.JsonSerialization;
 import com.fasterxml.jackson.core.type.TypeReference;
 import org.jboss.logging.Logger;
 
+import static org.keycloak.authentication.authenticators.browser.AbstractUsernameFormAuthenticator.ATTEMPTED_USERNAME;
 import static org.keycloak.authentication.authenticators.browser.AbstractUsernameFormAuthenticator.USER_SET_BEFORE_USERNAME_PASSWORD_AUTH;
 
 /**
@@ -51,11 +53,22 @@ public final class AuthenticatorUtils {
     private static final Logger logger = Logger.getLogger(AuthenticatorUtils.class);
 
     public static String getDisabledByBruteForceEventError(BruteForceProtector protector, KeycloakSession session, RealmModel realm, UserModel user) {
+        return getDisabledByBruteForceEventError(protector, session, realm, user, null);
+    }
+
+    public static String getDisabledByBruteForceEventError(BruteForceProtector protector, KeycloakSession session,
+            RealmModel realm, UserModel user, String attemptedIdentifier) {
+        return getDisabledByBruteForceEventError(protector, session, realm, user, null, attemptedIdentifier);
+    }
+
+    public static String getDisabledByBruteForceEventError(BruteForceProtector protector, KeycloakSession session,
+            RealmModel realm, UserModel user, String authenticationChannel, String attemptedIdentifier) {
         if (realm.isBruteForceProtected()) {
-            if (protector.isPermanentlyLockedOut(session, realm, user)) {
+            if (protector.isPermanentlyLockedOut(session, realm, user, authenticationChannel, attemptedIdentifier)) {
                 return Errors.USER_DISABLED;
             }
-            else if (protector.isTemporarilyDisabled(session, realm, user)) {
+            else if (protector.isTemporarilyDisabled(session, realm, user, authenticationChannel,
+                    attemptedIdentifier)) {
                 return Errors.USER_TEMPORARILY_DISABLED;
             }
             return null;
@@ -64,7 +77,20 @@ public final class AuthenticatorUtils {
     }
 
     public static String getDisabledByBruteForceEventError(AuthenticationFlowContext authnFlowContext, UserModel authenticatedUser) {
-        return AuthenticatorUtils.getDisabledByBruteForceEventError(authnFlowContext.getProtector(), authnFlowContext.getSession(), authnFlowContext.getRealm(), authenticatedUser);
+        String attemptedIdentifier = authnFlowContext.getAuthenticationSession() == null
+                ? null
+                : authnFlowContext.getAuthenticationSession().getAuthNote(ATTEMPTED_USERNAME);
+        return AuthenticatorUtils.getDisabledByBruteForceEventError(authnFlowContext.getProtector(),
+                authnFlowContext.getSession(), authnFlowContext.getRealm(), authenticatedUser,
+                getAuthenticationChannel(authnFlowContext), attemptedIdentifier);
+    }
+
+    private static String getAuthenticationChannel(AuthenticationFlowContext context) {
+        if (context.getExecution() == null) {
+            return null;
+        }
+        return AuthenticationManager.getAuthenticationCategory(context.getSession(),
+                context.getExecution().getAuthenticator());
     }
 
     /**
