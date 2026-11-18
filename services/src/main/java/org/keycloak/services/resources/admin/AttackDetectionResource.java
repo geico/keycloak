@@ -36,6 +36,7 @@ import org.keycloak.models.RealmModel;
 import org.keycloak.models.UserLoginFailureModel;
 import org.keycloak.models.UserModel;
 import org.keycloak.services.managers.BruteForceProtector;
+import org.keycloak.services.managers.BruteForceUserProperty;
 import org.keycloak.services.resources.KeycloakOpenAPI;
 import org.keycloak.services.resources.admin.fgap.AdminPermissionEvaluator;
 
@@ -105,25 +106,55 @@ public class AttackDetectionResource {
         if (!realm.isBruteForceProtected()) return data;
 
 
-        UserLoginFailureModel model = session.loginFailures().getUserLoginFailure(realm, userId);
-        if (model == null) return data;
-
-        boolean disabled = isUserDisabled(model, user);
-        if (disabled) {
-            data.put("disabled", true);
-            if(session.getProvider(BruteForceProtector.class).isTemporarilyDisabled(session, realm, user)) {
+        if (user == null) {
+            UserLoginFailureModel model = session.loginFailures().getUserLoginFailure(realm, userId);
+            if (model == null) return data;
+            copyFailureStatus(data, model);
+            if (isUserDisabled(model, null)) {
+                data.put("disabled", true);
                 data.put("failedLoginNotBefore", model.getFailedLoginNotBefore());
-            } else {
-                data.put("failedLoginNotBefore", Long.MAX_VALUE);
             }
+            return data;
         }
 
+        UserLoginFailureModel latestFailure = null;
+        int failedLoginNotBefore = 0;
+        boolean disabled = isUserDisabledOrLockedByBruteForce(session, realm, user);
+        boolean permanentlyLocked = session.getProvider(BruteForceProtector.class)
+                .isPermanentlyLockedOut(session, realm, user);
+        for (String failureKey : BruteForceUserProperty.getFailureKeys(realm, user)) {
+            UserLoginFailureModel model = session.loginFailures().getUserLoginFailure(realm, failureKey);
+            if (model == null) continue;
+            data.put("numFailures", Math.max((int) data.get("numFailures"), model.getNumFailures()));
+            data.put("numSecondaryAuthFailures",
+                    Math.max((int) data.get("numSecondaryAuthFailures"), model.getNumSecondaryAuthFailures()));
+            data.put("numTemporaryLockouts",
+                    Math.max((int) data.get("numTemporaryLockouts"), model.getNumTemporaryLockouts()));
+            failedLoginNotBefore = Math.max(failedLoginNotBefore, model.getFailedLoginNotBefore());
+            boolean keyPermanentlyLocked = BruteForceUserProperty.isPermanentlyLocked(realm, model);
+            permanentlyLocked |= keyPermanentlyLocked;
+            disabled |= Time.currentTime() < model.getFailedLoginNotBefore() || keyPermanentlyLocked;
+            if (latestFailure == null || model.getLastFailure() > latestFailure.getLastFailure()) {
+                latestFailure = model;
+            }
+        }
+        if (latestFailure != null) {
+            data.put("lastFailure", latestFailure.getLastFailure());
+            data.put("lastIPFailure", latestFailure.getLastIPFailure());
+        }
+        if (disabled) {
+            data.put("disabled", true);
+            data.put("failedLoginNotBefore", permanentlyLocked ? Long.MAX_VALUE : failedLoginNotBefore);
+        }
+        return data;
+    }
+
+    private void copyFailureStatus(Map<String, Object> data, UserLoginFailureModel model) {
         data.put("numFailures", model.getNumFailures());
         data.put("numSecondaryAuthFailures", model.getNumSecondaryAuthFailures());
         data.put("numTemporaryLockouts", model.getNumTemporaryLockouts());
         data.put("lastFailure", model.getLastFailure());
         data.put("lastIPFailure", model.getLastIPFailure());
-        return data;
     }
 
     private boolean isUserDisabled(UserLoginFailureModel model, UserModel user) {
@@ -157,9 +188,13 @@ public class AttackDetectionResource {
         } else {
             auth.users().requireManage(user);
         }
-        UserLoginFailureModel model = session.loginFailures().getUserLoginFailure(realm, userId);
-        if (model != null) {
-            session.loginFailures().removeUserLoginFailure(realm, userId);
+        boolean removed = user == null
+                ? session.loginFailures().getUserLoginFailure(realm, userId) != null
+                : BruteForceUserProperty.removeLoginFailures(session, realm, user);
+        if (removed) {
+            if (user == null) {
+                session.loginFailures().removeUserLoginFailure(realm, userId);
+            }
             adminEvent.operation(OperationType.DELETE).resourcePath(session.getContext().getUri()).success();
         }
     }
